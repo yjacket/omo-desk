@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -96,6 +97,21 @@ test("a child 'error' event stays caught and the spawn result still resolves", a
 	assert.equal(result.via, "spawn");
 	assert.equal(result.pid, 55);
 	await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("a child 'error' event is appended to <home>/logs/launch.log", async () => {
+	const tmp = makeTmpHome();
+	try {
+		const env = { OMO_VISUAL_BOARD_HOME: tmp.home };
+		const fake = fakeSpawn(() => ({ pid: 55, error: new Error("spawn boom") }));
+		const result = await launchServer({ env, platform: "linux", spawnImpl: fake.impl });
+		assert.equal(result.via, "spawn");
+		await new Promise((resolve) => setImmediate(resolve));
+		const log = fs.readFileSync(path.join(tmp.home, "logs", "launch.log"), "utf8");
+		assert.match(log, /spawn boom/);
+	} finally {
+		tmp.cleanup();
+	}
 });
 
 test("a non-win32 platform uses the plain spawn without powershell", async () => {

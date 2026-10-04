@@ -368,6 +368,72 @@ test("a refused repoRoot never stops or writes over a running server", async () 
 	}
 });
 
+/** Flip the case of the first ASCII letter so a win32 path names the same directory. */
+function swapCase(target) {
+	const at = target.search(/[a-zA-Z]/);
+	if (at === -1) return target;
+	const ch = target[at];
+	const flipped = ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();
+	return target.slice(0, at) + flipped + target.slice(at + 1);
+}
+
+/** Make <home>/app look like a real checkout, so a refusal can only come from the path guard. */
+function seedAppCheckout(app) {
+	fs.mkdirSync(path.join(app, "src"), { recursive: true });
+	fs.writeFileSync(path.join(app, "src", "server.mjs"), "export {};\n");
+	fs.writeFileSync(path.join(app, "keep.txt"), "keep\n");
+}
+
+test("a repoRoot naming <home>/app in a different letter case is refused before any shutdown", async (t) => {
+	if (process.platform !== "win32") {
+		t.skip("case-insensitive path identity is a win32 property");
+		return;
+	}
+	const s = setup();
+	try {
+		const app = path.join(s.home, "app");
+		seedAppCheckout(app);
+		s.fetch.state.healthy = true;
+		const repoRoot = swapCase(app);
+		assert.notEqual(repoRoot, app);
+		const { ok, lines } = await install({ ...s.opts, repoRoot });
+		assert.equal(ok, false);
+		assert.ok(lines.includes(`app: failed:not a repo checkout ${repoRoot}`), lines.join("\n"));
+		assert.equal(s.fetch.calls.some((call) => call.url.endsWith("/api/shutdown")), false);
+		assert.equal(s.fetch.calls.some((call) => call.url.endsWith("/api/health")), false);
+		assert.equal(fs.readFileSync(path.join(app, "keep.txt"), "utf8"), "keep\n");
+		assert.equal(s.spawn.calls.length, 0);
+	} finally {
+		s.tmp.cleanup();
+	}
+});
+
+test("a repoRoot reached through a junction into <home>/app is refused before any shutdown", async (t) => {
+	const s = setup();
+	const link = path.join(s.tmp.home, "app-link");
+	try {
+		const app = path.join(s.home, "app");
+		seedAppCheckout(app);
+		try {
+			fs.symlinkSync(app, link, "junction");
+		} catch (error) {
+			// e.g. a locked-down Windows box where reparse points are unavailable.
+			t.skip(`junction unavailable: ${error.message}`);
+			return;
+		}
+		s.fetch.state.healthy = true;
+		const { ok, lines } = await install({ ...s.opts, repoRoot: link });
+		assert.equal(ok, false);
+		assert.ok(lines.includes(`app: failed:not a repo checkout ${link}`), lines.join("\n"));
+		assert.equal(s.fetch.calls.some((call) => call.url.endsWith("/api/shutdown")), false);
+		assert.equal(fs.readFileSync(path.join(app, "keep.txt"), "utf8"), "keep\n");
+		assert.equal(s.spawn.calls.length, 0);
+	} finally {
+		fs.rmSync(link, { recursive: true, force: true });
+		s.tmp.cleanup();
+	}
+});
+
 test("uninstall removes extension, skill, rule and Run value, and keeps data", async () => {
 	const s = setup();
 	try {

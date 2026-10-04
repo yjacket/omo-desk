@@ -59,6 +59,25 @@ function readText(file) {
 	}
 }
 
+/**
+ * Canonical form of a path for identity comparison: resolve symlinks/junctions when the path exists
+ * (falling back to the plain resolve otherwise), and fold case on win32 where NTFS is
+ * case-insensitive. A raw string compare misses `c:/users/.../app` and a junction into <home>/app.
+ */
+function canonicalPath(target) {
+	let resolved;
+	try {
+		resolved = fs.realpathSync.native(target);
+	} catch {
+		resolved = path.resolve(target);
+	}
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isSamePath(a, b) {
+	return canonicalPath(a) === canonicalPath(b);
+}
+
 function writeIfChanged(file, text) {
 	const current = readText(file);
 	if (current === text) return "unchanged";
@@ -194,7 +213,7 @@ export async function install(opts = {}) {
 
 	// 1. app - refuse a non-repo source before anything is stopped or deleted, so a refused install
 	// leaves a running server alone instead of shutting it down and exiting 1.
-	if (!fs.existsSync(path.join(repoRoot, "src", "server.mjs")) || path.resolve(repoRoot) === path.resolve(l.app)) {
+	if (!fs.existsSync(path.join(repoRoot, "src", "server.mjs")) || isSamePath(repoRoot, l.app)) {
 		lines.push(`app: ${fail(`not a repo checkout ${repoRoot}`)}`);
 		return { ok, lines };
 	}
