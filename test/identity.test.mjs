@@ -34,12 +34,12 @@ function initRepo(home, name, remote) {
 describe("normalizeRemote", () => {
 	test("normalizes remote urls to a lowercase key with original-case name", () => {
 		const table = [
-			["https://github.com/yjacket/study.git", "github.com/yjacket/study", "study"],
-			["git@GitHub.com:yjacket/Study.git", "github.com/yjacket/study", "Study"],
-			["ssh://git@github.com:22/yjacket/x", "github.com/yjacket/x", "x"],
+			["https://github.com/acme/widget.git", "github.com/acme/widget", "widget"],
+			["git@GitHub.com:acme/Widget.git", "github.com/acme/widget", "Widget"],
+			["ssh://git@github.com:22/acme/x", "github.com/acme/x", "x"],
 			["https://u:p@gitlab.com/a/b/", "gitlab.com/a/b", "b"],
-			["https://github.com/yjacket/study", "github.com/yjacket/study", "study"],
-			["  https://github.com/yjacket/study.git  ", "github.com/yjacket/study", "study"],
+			["https://github.com/acme/widget", "github.com/acme/widget", "widget"],
+			["  https://github.com/acme/widget.git  ", "github.com/acme/widget", "widget"],
 		];
 		for (const [url, key, name] of table) {
 			assert.deepEqual(normalizeRemote(url), { key, name }, url);

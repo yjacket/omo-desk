@@ -11,7 +11,7 @@ const PROTOTYPE_BOARD = `{
   "title": "visual-board 스킬 — 구조와 방법 검토",
   "lead": "만들기 전에 저장소 모양, 부품, 작업 흐름, 설치, 판단 규칙을 봅니다. 고칠 곳은 네모로 표시하고 의견을 적어 주세요. 아래 질문 네 개에 답하고 '세션에 보내기'를 누르면 됩니다.",
   "sections": [
-    { "title": "저장소 구조", "desc": "C:/dev/omo/omo-visual-board", "cards": [
+    { "title": "저장소 구조", "desc": "C:/dev/repo", "cards": [
       { "badge": "1", "title": "폴더와 파일", "layout": "one", "diagram": true,
         "note": "기존 omo-* 저장소와 같은 모양: README.md가 명세, README.ko.md는 한국어 짝, CLAUDE.md, node --test. skill/ 아래가 그대로 설치된다.",
         "frames": [["저장소", "diagrams/repo.svg"]] } ] },
@@ -33,7 +33,7 @@ const PROTOTYPE_BOARD = `{
         "frames": [["판단", "diagrams/checks.svg"]] } ] }
   ],
   "questions": [
-    { "id": "name", "text": "저장소 이름", "help": "C:/dev/omo 아래 폴더 이름이자 GitHub 저장소 이름. 기존 저장소는 모두 omo-<하는 일> 꼴이다.", "options": [
+    { "id": "name", "text": "저장소 이름", "help": "저장소 폴더 이름이자 GitHub 저장소 이름.", "options": [
       { "value": "omo-visual-board", "label": "omo-visual-board", "rec": true, "why": "스킬 이름(visual-board)과 같아서 찾기 쉽다." },
       { "value": "omo-board", "label": "omo-board", "why": "짧다. 대신 무슨 보드인지 이름만으로는 모른다." },
       { "value": "omo-visual-review", "label": "omo-visual-review", "why": "하는 일(그림으로 검토)을 그대로 말한다. 스킬 이름과는 달라진다." } ] },
