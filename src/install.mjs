@@ -195,12 +195,18 @@ export async function install(opts = {}) {
 	const port = readConfig(env).port;
 	if (await healthOk(fetchImpl, port)) {
 		try {
-			await fetchImpl(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" });
+			await fetchImpl(`http://127.0.0.1:${port}/api/shutdown`, {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-vb": "1" },
+				body: "{}",
+			});
 		} catch {
 			// the wait below is the source of truth
 		}
 		const down = await waitUntil(async () => !(await healthOk(fetchImpl, port)), { timeoutMs: STOP_TIMEOUT_MS, now, sleep });
 		lines.push(`stop: ${down ? "stopped" : fail("server did not stop")}`);
+		// a live server still holds <home>/app open - copying over it only produces EPERM noise.
+		if (!down) return { ok, lines };
 	} else {
 		lines.push("stop: skipped");
 	}
@@ -319,7 +325,11 @@ export async function uninstall(opts = {}) {
 
 	if (await healthOk(fetchImpl, cfg.port)) {
 		try {
-			await fetchImpl(`http://127.0.0.1:${cfg.port}/api/shutdown`, { method: "POST" });
+			await fetchImpl(`http://127.0.0.1:${cfg.port}/api/shutdown`, {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-vb": "1" },
+				body: "{}",
+			});
 		} catch {
 			// the wait below is the source of truth
 		}

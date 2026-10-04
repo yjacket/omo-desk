@@ -33,7 +33,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 	const args = [...SERVER_NODE_ARGS, script];
 	const resolveNode = () => (isNodeExe(execPath) ? execPath : findNode(env, platform));
 	const spawnChild = (node, wmiError) => {
-		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, env });
+		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: homeDir(env), env });
 		child.unref?.();
 		return { via: "spawn", pid: child.pid, ...(wmiError ? { wmiError } : {}) };
 	};
@@ -64,7 +64,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 			ps = spawnImpl("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WMI_CREATE_SCRIPT], {
 				stdio: ["ignore", "pipe", "ignore"],
 				windowsHide: true,
-				env: { ...env, VB_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), VB_LAUNCH_CWD: path.dirname(path.dirname(script)) },
+				env: { ...env, VB_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), VB_LAUNCH_CWD: homeDir(env) },
 			});
 		} catch (error) {
 			finish(spawnChild(node, `spawn: ${error.message}`));
