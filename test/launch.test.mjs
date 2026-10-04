@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeTmpHome } from "./helpers/tmp-home.mjs";
+import { homeDir } from "../src/paths.mjs";
 import { SERVER_NODE_ARGS, launchServer } from "../src/launch.mjs";
 
 function fakeSpawn(plan) {
@@ -48,6 +48,7 @@ test("an OMO_VISUAL_BOARD_ env key keeps the plain detached spawn with the serve
 		assert.equal(call.options.detached, true);
 		assert.equal(call.options.stdio, "ignore");
 		assert.equal(call.options.windowsHide, true);
+		assert.equal(call.options.cwd, homeDir(env));
 		assert.equal(call.options.env, env);
 		assert.equal(call.unrefed, true);
 	} finally {
@@ -69,12 +70,13 @@ test("win32 without VB_/OMO_VISUAL_BOARD_ env creates the process through WMI", 
 	assert.match(call.options.env.VB_LAUNCH_CMD, /--max-semi-space-size=1/);
 	assert.match(call.options.env.VB_LAUNCH_CMD, /--max-old-space-size=128/);
 	assert.match(call.options.env.VB_LAUNCH_CMD, /server\.mjs/);
-	assert.equal(call.options.env.VB_LAUNCH_CWD, path.join(os.homedir(), ".omo-visual-board", "app"));
+	assert.equal(call.options.env.VB_LAUNCH_CWD, homeDir(env));
 });
 
 test("a WMI failure falls back to the plain spawn and reports wmiError", async () => {
 	const fake = fakeSpawn((call) => (call.cmd === "powershell.exe" ? { out: "9 0\n", close: 0 } : { pid: 777 }));
-	const result = await launchServer({ env: {}, platform: "win32", spawnImpl: fake.impl });
+	const env = {};
+	const result = await launchServer({ env, platform: "win32", spawnImpl: fake.impl });
 	assert.equal(result.via, "spawn");
 	assert.equal(result.pid, 777);
 	assert.equal(typeof result.wmiError, "string");
@@ -82,6 +84,7 @@ test("a WMI failure falls back to the plain spawn and reports wmiError", async (
 	assert.equal(fake.calls[1].cmd, process.execPath);
 	assert.deepEqual(fake.calls[1].args.slice(0, SERVER_NODE_ARGS.length), SERVER_NODE_ARGS);
 	assert.equal(fake.calls[1].options.detached, true);
+	assert.equal(fake.calls[1].options.cwd, homeDir(env));
 });
 
 test("a non-win32 platform uses the plain spawn without powershell", async () => {
