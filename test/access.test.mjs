@@ -6,7 +6,7 @@ import { ALLOW, classify, postGuard } from "../src/access.mjs";
 const LOOPBACK = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
 
 test("non-loopback remoteAddress is rejected before anything else", () => {
-	for (const remoteAddress of ["192.168.0.10", "100.103.146.55", "", undefined]) {
+	for (const remoteAddress of ["192.168.0.10", "100.64.0.55", "", undefined]) {
 		assert.equal(classify({ remoteAddress, headers: { host: "localhost" } }), "reject");
 	}
 });
@@ -36,8 +36,8 @@ test("x-forwarded-for equal to a pcIp classifies as pc without identity headers"
 	assert.equal(
 		classify({
 			remoteAddress: "127.0.0.1",
-			headers: { "x-forwarded-for": "100.103.146.55" },
-			pcIps: ["100.103.146.55"],
+			headers: { "x-forwarded-for": "100.64.0.55" },
+			pcIps: ["100.64.0.55"],
 		}),
 		"pc",
 	);
@@ -47,8 +47,8 @@ test("x-forwarded-for with a non-pc ip rejects without identity headers", () => 
 	assert.equal(
 		classify({
 			remoteAddress: "127.0.0.1",
-			headers: { "x-forwarded-for": "100.103.146.56" },
-			pcIps: ["100.103.146.55"],
+			headers: { "x-forwarded-for": "100.64.0.56" },
+			pcIps: ["100.64.0.55"],
 		}),
 		"reject",
 	);
@@ -106,8 +106,8 @@ test("first forwarded entry wins and is trimmed", () => {
 	assert.equal(
 		classify({
 			remoteAddress: "::1",
-			headers: { "x-forwarded-for": " 100.103.146.55 , 10.0.0.1" },
-			pcIps: ["100.103.146.55"],
+			headers: { "x-forwarded-for": " 100.64.0.55 , 10.0.0.1" },
+			pcIps: ["100.64.0.55"],
 			owner: "a@b",
 		}),
 		"pc",
@@ -135,18 +135,18 @@ test("postGuard requires json content-type and x-vb", () => {
 
 test("qa scenario: pcIp traffic is pc, funnel header forces reject", () => {
 	const headers = {
-		"x-forwarded-for": "100.103.146.55",
+		"x-forwarded-for": "100.64.0.55",
 		"tailscale-user-login": "a@b",
 	};
 	assert.equal(
-		classify({ remoteAddress: "127.0.0.1", headers, pcIps: ["100.103.146.55"] }),
+		classify({ remoteAddress: "127.0.0.1", headers, pcIps: ["100.64.0.55"] }),
 		"pc",
 	);
 	assert.equal(
 		classify({
 			remoteAddress: "127.0.0.1",
 			headers: { ...headers, "tailscale-funnel-request": "?1" },
-			pcIps: ["100.103.146.55"],
+			pcIps: ["100.64.0.55"],
 		}),
 		"reject",
 	);
