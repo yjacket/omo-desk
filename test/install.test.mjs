@@ -193,10 +193,8 @@ test("fresh install writes every step and copies the app", async () => {
 			web: { Handlers: { "/": { Proxy: "https://127.0.0.1:443" } } },
 			allowFunnel: {},
 		});
-		const server = JSON.parse(fs.readFileSync(path.join(s.home, "server.json"), "utf8"));
-		assert.equal(server.pid, 4321);
-		assert.equal(server.port, 4377);
-		assert.equal(server.version, "0.1.0");
+		// server.json belongs to the running server, so install must not write one.
+		assert.equal(fs.existsSync(path.join(s.home, "server.json")), false);
 	} finally {
 		s.tmp.cleanup();
 	}
@@ -298,6 +296,77 @@ for (const [name, breakAfter] of [["the 443 Web entry", "web443"], ["an AllowFun
 		}
 	});
 }
+
+test("install without repoRoot copies the repo the module lives in, not the cwd", async () => {
+	const s = setup();
+	const cwd = process.cwd();
+	try {
+		const { repoRoot, ...opts } = s.opts;
+		const decoy = path.join(s.tmp.home, "cwd-decoy");
+		fs.mkdirSync(decoy, { recursive: true });
+		process.chdir(decoy);
+		const { ok, lines } = await install(opts);
+		assert.equal(ok, true, lines.join("\n"));
+		assert.equal(lineFor(lines, "app"), "app: written");
+		assert.ok(fs.existsSync(path.join(s.home, "app", "src", "server.mjs")), lines.join("\n"));
+		assert.ok(fs.existsSync(path.join(s.home, "app", "package.json")));
+	} finally {
+		process.chdir(cwd);
+		s.tmp.cleanup();
+	}
+});
+
+test("a repoRoot that is not a repo checkout is refused without touching the app dir", async () => {
+	const s = setup();
+	try {
+		const app = path.join(s.home, "app");
+		fs.mkdirSync(app, { recursive: true });
+		fs.writeFileSync(path.join(app, "keep.txt"), "keep\n");
+		const empty = path.join(s.tmp.home, "empty");
+		fs.mkdirSync(empty, { recursive: true });
+		const { ok, lines } = await install({ ...s.opts, repoRoot: empty });
+		assert.equal(ok, false);
+		assert.ok(lines.includes(`app: failed:not a repo checkout ${empty}`), lines.join("\n"));
+		assert.equal(fs.readFileSync(path.join(app, "keep.txt"), "utf8"), "keep\n");
+	} finally {
+		s.tmp.cleanup();
+	}
+});
+
+test("a repoRoot equal to <home>/app is refused so install cannot delete its own source", async () => {
+	const s = setup();
+	try {
+		const app = path.join(s.home, "app");
+		fs.mkdirSync(app, { recursive: true });
+		fs.writeFileSync(path.join(app, "keep.txt"), "keep\n");
+		const { ok, lines } = await install({ ...s.opts, repoRoot: app });
+		assert.equal(ok, false);
+		assert.ok(lines.includes(`app: failed:not a repo checkout ${app}`), lines.join("\n"));
+		assert.equal(fs.readFileSync(path.join(app, "keep.txt"), "utf8"), "keep\n");
+	} finally {
+		s.tmp.cleanup();
+	}
+});
+
+test("a refused repoRoot never stops or writes over a running server", async () => {
+	const s = setup();
+	try {
+		s.fetch.state.healthy = true;
+		const app = path.join(s.home, "app");
+		fs.mkdirSync(app, { recursive: true });
+		fs.writeFileSync(path.join(app, "keep.txt"), "keep\n");
+		const { ok, lines } = await install({ ...s.opts, repoRoot: app });
+		assert.equal(ok, false);
+		assert.ok(lines.includes(`app: failed:not a repo checkout ${app}`), lines.join("\n"));
+		// the refused install must not have reached step 0 at all.
+		assert.equal(s.fetch.calls.some((call) => call.url.endsWith("/api/shutdown")), false);
+		assert.equal(s.fetch.calls.some((call) => call.url.endsWith("/api/health")), false);
+		assert.equal(fs.readFileSync(path.join(app, "keep.txt"), "utf8"), "keep\n");
+		assert.equal(s.spawn.calls.length, 0);
+	} finally {
+		s.tmp.cleanup();
+	}
+});
 
 test("uninstall removes extension, skill, rule and Run value, and keeps data", async () => {
 	const s = setup();

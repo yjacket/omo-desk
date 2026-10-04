@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { launchServer } from "./launch.mjs";
 import { agentDir, layout, readConfig } from "./paths.mjs";
@@ -34,7 +35,7 @@ function resolve(opts) {
 	const env = opts.env ?? process.env;
 	return {
 		env,
-		repoRoot: opts.repoRoot ?? process.cwd(),
+		repoRoot: opts.repoRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
 		userHome: opts.userHome ?? os.homedir(),
 		execPath: opts.execPath ?? process.execPath,
 		fetchImpl: opts.fetch ?? globalThis.fetch,
@@ -191,6 +192,13 @@ export async function install(opts = {}) {
 		return `failed:${reason}`;
 	};
 
+	// 1. app - refuse a non-repo source before anything is stopped or deleted, so a refused install
+	// leaves a running server alone instead of shutting it down and exiting 1.
+	if (!fs.existsSync(path.join(repoRoot, "src", "server.mjs")) || path.resolve(repoRoot) === path.resolve(l.app)) {
+		lines.push(`app: ${fail(`not a repo checkout ${repoRoot}`)}`);
+		return { ok, lines };
+	}
+
 	// 0. stop - a running server must not serve a half-copied app.
 	const port = readConfig(env).port;
 	if (await healthOk(fetchImpl, port)) {
@@ -211,14 +219,15 @@ export async function install(opts = {}) {
 		lines.push("stop: skipped");
 	}
 
-	// 1. app - replace the copy wholesale.
+	// 1. app - replace the copy wholesale (the source was validated up front).
 	fs.rmSync(l.app, { recursive: true, force: true });
 	fs.mkdirSync(l.app, { recursive: true });
 	for (const entry of APP_ENTRIES) {
 		const src = path.join(repoRoot, entry);
 		if (fs.existsSync(src)) fs.cpSync(src, path.join(l.app, entry), { recursive: true });
 	}
-	lines.push("app: written");
+	const missing = APP_ENTRIES.filter((entry) => !fs.existsSync(path.join(l.app, entry)));
+	lines.push(missing.length === 0 ? "app: written" : `app: ${fail(`missing ${missing[0]}`)}`);
 
 	// 2. launcher
 	const launcher = launcherContent({ nodeExe: execPath, serverPath: path.join(l.app, "src", "server.mjs") });
@@ -298,9 +307,7 @@ export async function install(opts = {}) {
 	const launched = await launchServer({ env, spawnImpl: runners.spawn, execPath });
 	const up = await waitUntil(async () => await healthOk(fetchImpl, port), { timeoutMs: SERVER_TIMEOUT_MS, now, sleep });
 	if (up) {
-		const version = readJsonSafe(path.join(l.app, "package.json"))?.version;
-		fs.mkdirSync(l.home, { recursive: true });
-		fs.writeFileSync(l.serverJson, `${JSON.stringify({ pid: launched.pid, port, started: new Date(now()).toISOString(), version }, null, 2)}\n`);
+		// server.json belongs to the running server (src/server.mjs), not to install.
 		lines.push(`server: started:${launched.pid}`);
 	} else {
 		lines.push(`server: ${fail("health timeout")}`);
