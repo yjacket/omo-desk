@@ -21,6 +21,8 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 .\install.ps1 --no-autostart  # skip the HKCU Run value
 ```
 
+Install copies from the checkout the CLI lives in, not the current directory. Run from the installed copy (`<home>/app`), it refuses before stopping anything.
+
 Steps, in order, each reporting `written | unchanged | skipped | failed:<reason>`:
 
 | # | Step | What happens |
@@ -63,7 +65,7 @@ The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니�
 
 Exit 8 prints `open proposal exists: <id> <url> - use: vb revise <id> <boardDir>, or vb submit --new` on stderr.
 
-`submit` and `revise` send the absolute board dir and the identity of the current directory; the server validates. Before talking to the server the CLI runs `ensure`: GET `/api/health` (1500 ms timeout). A foreign answer exits 3. A different version gets `/api/shutdown` and a relaunch. No answer launches the server, then up to 20 health checks. `VB_URL` overrides the base URL, `VB_NO_ENSURE=1` skips launching, `VB_WAIT_POLL_MS` (default 2000) and `VB_ENSURE_POLL_MS` (default 500) set poll intervals.
+`submit` and `revise` send the absolute board dir and the identity of the current directory; the server validates. Before talking to the server the CLI runs `ensure`: GET `/api/health` (1500 ms timeout). A foreign answer exits 3. On a version mismatch the CLI restarts the server (`/api/shutdown`, then a relaunch) only when the installed app's version equals the CLI's. Otherwise it warns `server version <x> differs from cli <y>; run install to update` and keeps using the running server. No answer launches the server, then up to 20 health checks. `VB_URL` overrides the base URL, `VB_NO_ENSURE=1` skips launching, `VB_WAIT_POLL_MS` (default 2000) and `VB_ENSURE_POLL_MS` (default 500) set poll intervals.
 
 On Windows the server is created through `Win32_Process.Create` (PowerShell, hidden) so it outlives the caller's terminal. If WMI fails, or any env key starts with `OMO_VISUAL_BOARD_` or `VB_`, it falls back to a detached `spawn`.
 
@@ -110,10 +112,10 @@ See `skill/example/` for a working board.
 - Status: any `closed` gives `closed`; otherwise a last `feedback` gives `theirs` (your feedback is waiting on the session, `approved` if the verdict was approve); otherwise `mine` (waiting on you).
 - Owner is the session id of the latest event that has one.
 - Submitting the same feature + title again while open returns the existing proposal when the content hash matches, otherwise exit 8. `--new` always creates.
-- Feedback `delivery` is computed: `none` (no owner), `pending` (inbox file present), `delivered`.
+- Feedback `delivery` is computed: `none` (no owner, or the inbox write failed: the event is stored, the server retried once and logged it), `pending` (inbox file present), `delivered`.
 - Product key comes from the normalized `origin` remote (lowercased `host/path`), feature key is `<product key>#<branch>`, and the worktree path scopes counts and notices.
 
-`config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json`: `{ "pid", "port", "started", "version" }`.
+`config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json` is written only by the server: `{ "v", "name", "port", "pid", "started", "version" }`. Install doesn't write it.
 
 ## HTTP API
 
@@ -140,7 +142,7 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | POST | `/api/bye` | session | `{ ok }` |
 | POST | `/api/shutdown` | session | `{ ok }`, then exit |
 
-Errors: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400 with `details`, access denied 403 `{ error: 'forbidden' }`, `/api/open` URL over 30000 chars 413 `{ error: 'too_long' }`.
+Errors: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400 with `details`, access denied 403 `{ error: 'forbidden' }`, `/api/open` URL over 30000 chars 413 `{ error: 'too_long' }`, `/api/open` with the Aside exe missing 404 `{ error: "not_installed" }`.
 
 `/api/open` targets come from `web/targets.json` (ChatGPT, Claude, Claude app, Aside, copy). PC-only targets need `open` access. Aside gets the board URL with `--single-argument`; others go through `rundll32 url.dll,FileProtocolHandler`.
 
