@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>검토함</title>
+<link rel="icon" href="data:,">
+<style>
+	/* Tokens: the prototype board.html palette, type and spacing, named so every rule below reads from one place. */
+	:root{
+		--bg:#f4f5f7;--surface:#fff;--fill:#f2f4f7;
+		--ink:#1d2330;--ink-2:#475467;--muted:#667085;--faint:#98a2b3;
+		--line:#e4e7ec;--line-2:#d0d5dd;
+		--edit:#ff2d55;
+		--mark:#1463ff;--mark-fill:rgba(20,99,255,.10);--mark-tint:rgba(20,99,255,.12);--mark-glow:rgba(20,99,255,.35);
+		--side-bg:#f0f6ff;--side-line:#c7dcff;--side-ink:#1d3a6b;
+		--rec-bg:#e7f6ec;--rec-ink:#1f7a45;
+		--dark:#0f1115;--dark-ink:#d6deeb;--dark-accent:#7ee2a8;
+		--shadow-panel:0 12px 32px rgba(16,24,40,.18);--shadow-fab:0 6px 18px var(--mark-glow);
+		--r-xs:3px;--r-sm:7px;--r-md:10px;--r-lg:14px;--r-pill:999px;
+		--s-1:4px;--s-2:8px;--s-3:10px;--s-4:12px;--s-5:14px;--s-6:18px;--s-7:20px;--s-8:24px;--s-9:32px;
+		--frame-min:150px;
+		--fs-xs:12px;--fs-sm:13px;--fs-md:14px;--fs-base:15px;--fs-lg:16px;--fs-xl:19px;--fs-2xl:24px;
+		--font:"Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+		--mono:Consolas,"D2Coding",monospace;
+	}
+	*{box-sizing:border-box}
+	[hidden]{display:none !important}
+	body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.55}
+	main{max-width:1180px;margin:0 auto;padding:var(--s-9) var(--s-8) 80px}
+	button{font:inherit}
+
+	/* Header: back link, chips, title, revision tabs, banners */
+	.top{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);margin-bottom:var(--s-5)}
+	.back{color:var(--muted);text-decoration:none;font-size:var(--fs-md);padding:var(--s-1) 0}
+	.back:hover{color:var(--ink)}
+	.chips{display:flex;flex-wrap:wrap;gap:var(--s-2);margin-left:auto}
+	.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:3px var(--s-3);font-size:var(--fs-sm);color:var(--ink-2);max-width:100%}
+	.chip i{font-style:normal;color:var(--muted)}
+	.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+	.chip.mine{background:var(--ink);border-color:var(--ink);color:#fff}
+	.chip.theirs{background:var(--side-bg);border-color:var(--side-line);color:var(--side-ink)}
+	.chip.closed{background:var(--fill);color:var(--muted)}
+	.chip.ok{background:var(--rec-bg);border-color:var(--rec-bg);color:var(--rec-ink)}
+	h1{margin:0 0 6px;font-size:var(--fs-2xl);overflow-wrap:anywhere}
+	.lead{margin:0;color:var(--muted)}
+	.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--s-5)}
+	.tabs button{border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);border-radius:var(--r-pill);padding:5px var(--s-5);font-size:var(--fs-sm);font-weight:700;cursor:pointer}
+	.tabs button[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+	.banner{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);margin-top:var(--s-5);border-radius:var(--r-md);padding:var(--s-3) var(--s-5);font-size:var(--fs-md)}
+	.banner.new{background:var(--side-bg);border:1px solid var(--side-line);color:var(--side-ink)}
+	.banner.new button{margin-left:auto;background:var(--mark);color:#fff;border:none;border-radius:var(--r-sm);padding:6px var(--s-5);font-weight:700;cursor:pointer}
+	.banner.done{background:var(--ink);color:#fff}
+	.banner.old{background:var(--fill);border:1px solid var(--line);color:var(--ink-2)}
+	.banner.error{background:var(--surface);border:1px solid var(--line-2);color:var(--ink-2)}
+
+	/* Legend */
+	.legend{display:flex;flex-wrap:wrap;gap:var(--s-3);margin:var(--s-5) 0 var(--s-1)}
+	.legend span{display:inline-flex;align-items:center;gap:var(--s-2);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:var(--s-1) var(--s-4);font-size:var(--fs-sm)}
+	.sw-edit{width:22px;height:14px;border:2px solid var(--edit);border-radius:var(--r-xs)}
+	.sw-mark{width:22px;height:14px;border:3px dashed var(--mark);outline:2px solid #fff;background:var(--mark-tint);border-radius:2px}
+
+	/* Board sections, cards and frames (prototype) */
+	section.group{margin-top:26px}
+	section.group > h2{margin:0 0 var(--s-1);font-size:var(--fs-xl)}
+	section.group > p{margin:0 0 var(--s-3);color:var(--muted);font-size:var(--fs-md)}
+	.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s-6) var(--s-7);margin-top:var(--s-5)}
+	.card h3{margin:0 0 var(--s-3);font-size:var(--fs-lg);display:flex;gap:var(--s-3);align-items:center}
+	.card > h3.only{margin:0}
+	.badge{display:inline-flex;min-width:30px;height:26px;padding:0 9px;border-radius:var(--r-sm);background:var(--ink);color:#fff;font-size:var(--fs-md);align-items:center;justify-content:center}
+	.badge.gray{background:var(--faint)}
+	.note{margin:var(--s-2) 0 0;color:var(--ink-2);font-size:var(--fs-md)}
+	.frames{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:var(--s-5);align-items:start}
+	.frames.two{grid-template-columns:1fr 1fr}
+	.frames.one{grid-template-columns:1fr}
+	.frame{position:relative;min-height:var(--frame-min);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#111;touch-action:none;cursor:crosshair}
+	.frame.diagram{background:var(--surface);display:flex;align-items:center;justify-content:center;padding:var(--s-4)}
+	.frame.still{cursor:default}
+	.frame.still canvas{pointer-events:none}
+	body.readonly .frame,body.closed .frame{cursor:default}
+	body.readonly .frame canvas,body.closed .frame canvas{pointer-events:none}
+	.frame img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+	.frame.diagram img{max-height:720px;width:auto;max-width:100%;margin:0 auto}
+	/* A diagram shorter than --frame-min at fit width is shown --frame-min tall and the frame scrolls sideways (board.js sets .wide). */
+	.frame.diagram.wide{overflow-x:auto;justify-content:flex-start;touch-action:pan-x}
+	.frame.diagram.wide img{height:var(--frame-min);max-width:none}
+	.frame canvas{position:absolute;inset:0;width:100%;height:100%}
+	.frame.plain{display:block;padding:0}
+	.frame .fallback{margin:0;padding:38px var(--s-4) 0;color:var(--muted);font-size:var(--fs-sm)}
+	.frame pre{margin:0;padding:var(--s-3) var(--s-4) var(--s-4);font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+	.pill{position:absolute;left:var(--s-2);top:var(--s-2);background:var(--ink);color:#fff;font-size:var(--fs-xs);font-weight:700;padding:2px var(--s-2);border-radius:var(--r-md);pointer-events:none}
+
+	/* Marks (prototype) */
+	.marks{display:grid;gap:var(--s-4);margin-top:var(--s-3)}
+	.mark{display:grid;grid-template-columns:220px 1fr auto;gap:var(--s-4);align-items:start;border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s-3)}
+	.mark img,.mark .nocrop{width:100%;max-height:220px;object-fit:contain;border-radius:6px;background:var(--fill)}
+	.mark .nocrop{height:120px}
+	.mark b{font-size:var(--fs-sm)}
+	.num{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--mark);color:#fff;font-size:var(--fs-xs);font-weight:700;align-items:center;justify-content:center;margin-right:6px}
+	textarea{width:100%;min-height:64px;border:1px solid var(--line-2);border-radius:var(--r-sm);padding:var(--s-2) var(--s-3);font:inherit;font-size:var(--fs-md);resize:vertical;background:var(--surface);color:var(--ink)}
+	textarea:disabled{background:var(--fill);color:var(--ink-2)}
+	.del{border:none;background:none;color:var(--muted);cursor:pointer;font-size:var(--fs-sm)}
+	.del:disabled{visibility:hidden}
+	.empty{color:var(--muted);font-size:var(--fs-md);margin:0}
+
+	/* Questions, comment, send (prototype) */
+	.q{margin-top:var(--s-5)}
+	.q > b{font-size:var(--fs-base)}
+	.qhelp{margin:var(--s-1) 0 0;color:var(--ink-2);font-size:13.5px}
+	.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--s-2);margin:var(--s-2) 0 0}
+	.opts label{display:grid;grid-template-columns:auto 1fr;gap:var(--s-1) var(--s-2);align-items:start;border:1px solid var(--line-2);border-radius:var(--r-lg);padding:var(--s-3) var(--s-4);cursor:pointer;font-size:var(--fs-md)}
+	.opts label:has(input:checked){border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+	.opts label:has(input:disabled){cursor:default;color:var(--ink-2)}
+	.opts input{accent-color:var(--ink);margin-top:var(--s-1)}
+	.opts .why{grid-column:2;color:var(--muted);font-size:12.5px;line-height:1.45}
+	.side{margin:var(--s-3) 0 0;background:var(--side-bg);border:1px solid var(--side-line);border-radius:var(--r-md);padding:var(--s-3) var(--s-4);font-size:13.5px;color:var(--side-ink)}
+	.rec{font-size:11px;background:var(--rec-bg);color:var(--rec-ink);border-radius:var(--r-sm);padding:1px 6px}
+	.send{margin-top:var(--s-5);display:flex;gap:var(--s-4);align-items:center;flex-wrap:wrap}
+	.send button{flex:none;background:var(--ink);color:#fff;border:none;border-radius:var(--r-md);padding:var(--s-3) var(--s-6);font-size:var(--fs-base);font-weight:700;cursor:pointer}
+	.send button.approve{background:var(--rec-ink)}
+	.send button.ghost{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-2)}
+	.send button:disabled{opacity:.5;cursor:default}
+	#status{color:var(--muted);font-size:var(--fs-md)}
+
+	/* Conversation */
+	.thread{list-style:none;margin:var(--s-3) 0 0;padding:0;display:grid;gap:var(--s-4)}
+	.ev{border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s-3) var(--s-4)}
+	.ev.feedback{background:var(--side-bg);border-color:var(--side-line)}
+	.ev.reply{background:var(--dark);border-color:var(--dark);color:var(--dark-ink)}
+	.ev.closed{background:var(--fill)}
+	.evh{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);font-size:var(--fs-sm);color:var(--muted)}
+	.who{font-weight:700;color:var(--ink)}
+	.ev.feedback .who{color:var(--side-ink)}
+	.ev.reply .who{color:var(--dark-accent)}
+	.ev.reply .evh{color:var(--faint)}
+	.tag{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-2)}
+	.verdict{font-weight:700;color:var(--ink)}
+	.verdict.approve{color:var(--rec-ink)}
+	.when{margin-left:auto}
+	.evb{margin-top:6px;font-size:var(--fs-md);white-space:pre-wrap;overflow-wrap:anywhere}
+	.evb:empty{display:none}
+	.evb ul{margin:0 0 var(--s-1);padding-left:var(--s-6);white-space:normal}
+	.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--s-3);margin-top:var(--s-2);white-space:normal}
+	.crops figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:6px}
+	.crops img{display:block;width:100%;max-height:200px;object-fit:contain;background:var(--fill);border-radius:4px}
+	.crops figcaption{font-size:var(--fs-sm);color:var(--ink-2);margin-top:var(--s-1);white-space:pre-wrap}
+
+	/* AI panel (prototype) */
+	#aiFab{position:fixed;right:22px;bottom:22px;z-index:20;background:var(--mark);color:#fff;border:none;border-radius:var(--r-pill);padding:var(--s-4) var(--s-6);font-size:var(--fs-base);font-weight:700;box-shadow:var(--shadow-fab);cursor:pointer}
+	#aiPanel{position:fixed;right:22px;bottom:78px;z-index:20;width:min(360px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-panel);padding:var(--s-5)}
+	#aiPanel h4{margin:0 0 var(--s-1);font-size:var(--fs-base)}
+	#aiPanel p{margin:0 0 var(--s-3);color:var(--muted);font-size:var(--fs-sm)}
+	#aiPanel button{display:block;width:100%;text-align:left;border:1px solid var(--line-2);background:var(--surface);border-radius:var(--r-md);padding:9px var(--s-4);margin-top:var(--s-2);font-size:var(--fs-md);cursor:pointer}
+	#aiPanel button small{display:block;color:var(--muted);font-size:var(--fs-xs)}
+	#aiMsg{margin-top:var(--s-3);font-size:var(--fs-sm);color:var(--side-ink)}
+	#aiMsg:empty{display:none}
+
+	/* Mermaid renders here first so getBBox() has real layout; the result is serialized into an <img>. */
+	#mmdStage{position:absolute;left:-200000px;top:0;width:1600px;visibility:hidden;pointer-events:none}
+
+	@media (max-width:760px){
+		.frames,.frames.two{grid-template-columns:1fr}
+		.mark{grid-template-columns:1fr}
+		main{padding:22px var(--s-5) 60px}
+		.chips{margin-left:0}
+		.chip span{max-width:180px}
+		.card,.frame,.mark,.ev{flex:none}
+		.crops{grid-template-columns:1fr 1fr}
+		.when{margin-left:0}
+	}
+</style>
+</head>
+<body>
+<main>
+	<nav class="top">
+		<a class="back" href="/">← 검토함</a>
+		<div class="chips" id="chips"></div>
+	</nav>
+	<h1 id="title"></h1>
+	<p class="lead" id="lead"></p>
+	<div class="tabs" id="tabs" role="tablist" aria-label="안"></div>
+	<div class="banner error" id="loadError" hidden></div>
+	<div class="banner new" id="revBanner" hidden><span id="revBannerText"></span><button type="button" id="revBannerBtn">보기</button></div>
+	<div class="banner done" id="closedBanner" hidden></div>
+	<div class="banner old" id="oldNote" hidden>지난 안입니다. 보기만 할 수 있습니다.</div>
+	<div class="legend">
+		<span><i class="sw-edit"></i>빨간 실선: 시안에서 바뀐 곳</span>
+		<span><i class="sw-mark"></i>파란 점선 네모 + 번호: 내가 표시한 곳</span>
+	</div>
+	<div id="sections"></div>
+	<section class="card" id="marksCard">
+		<h3 class="only">표시한 곳</h3>
+		<div class="marks" id="marks"><p class="empty">아직 표시한 곳이 없습니다.</p></div>
+	</section>
+	<section class="card" id="decideCard">
+		<h3 class="only">정할 것</h3>
+		<p class="side" id="side" hidden></p>
+		<div id="questions"></div>
+		<div class="q" id="commentWrap"><b>전체 의견</b><textarea id="comment" style="margin-top:8px"></textarea></div>
+		<div class="send" id="sendRow">
+			<button id="sendBtn" type="button">의견 보내기</button>
+			<button id="approveBtn" type="button" class="approve">이대로 진행</button>
+			<button id="closeBtn" type="button" class="ghost">닫기</button>
+		</div>
+		<p id="status"></p>
+	</section>
+	<section class="card" id="threadCard">
+		<h3 class="only">대화</h3>
+		<ol class="thread" id="thread"></ol>
+	</section>
+</main>
+<button id="aiFab" type="button">AI에게 묻기</button>
+<div id="aiPanel" hidden>
+	<h4>이 보드를 AI와 이야기하기</h4>
+	<p>결론은 '전체 의견'에 붙여 넣고 보내세요.</p>
+	<div id="aiTargets"></div>
+	<div id="aiMsg"></div>
+</div>
+<div id="mmdStage" aria-hidden="true"></div>
+<script src="/web/board.js" defer></script>
+</body>
+</html>

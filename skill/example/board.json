@@ -1,0 +1,39 @@
+{
+	"title": "수강권 확인 흐름",
+	"lead": "강의 목록에 들어가기 전에 수강권을 확인합니다.",
+	"sections": [
+		{
+			"title": "바뀌는 것",
+			"desc": "화면은 그대로, 흐름과 테이블만 바뀝니다.",
+			"cards": [
+				{
+					"badge": "흐름",
+					"title": "로그인 후 수강권 확인",
+					"layout": "one",
+					"diagram": true,
+					"frames": [["흐름도", "flow.mmd"]]
+				},
+				{
+					"badge": "DB",
+					"title": "수강 등록 테이블 추가",
+					"layout": "one",
+					"diagram": true,
+					"note": "ENROLLMENT 테이블이 새로 생깁니다.",
+					"frames": [["ER", "er.mmd"]]
+				}
+			]
+		}
+	],
+	"questions": [
+		{
+			"id": "expired",
+			"text": "수강권이 만료되면 어떻게 할까요?",
+			"help": "만료 회원이 강의 목록을 볼 수 있는지가 정해집니다.",
+			"options": [
+				{ "value": "block", "label": "목록 막기", "rec": true, "why": "만료 회원은 수강권 안내 화면으로 갑니다." },
+				{ "value": "readonly", "label": "목록만 보기", "why": "목록은 보이고 재생만 막힙니다." }
+			]
+		}
+	],
+	"commentPlaceholder": "더 하고 싶은 말"
+}

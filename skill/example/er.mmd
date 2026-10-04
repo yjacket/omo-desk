@@ -1,0 +1,16 @@
+erDiagram
+	MEMBER ||--o{ ENROLLMENT : "수강"
+	LESSON ||--o{ ENROLLMENT : "등록됨"
+	MEMBER {
+		bigint mid PK
+		string name
+	}
+	LESSON {
+		bigint lid PK
+		string title
+	}
+	ENROLLMENT {
+		bigint mid FK
+		bigint lid FK
+		date expires
+	}

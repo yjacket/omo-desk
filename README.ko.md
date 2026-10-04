@@ -1,0 +1,199 @@
+# omo-visual-board
+
+[English](README.md) | 한국어
+
+시각 기획안을 위한 로컬 검토함입니다. omo 에이전트 세션이 보드(그림, 다이어그램, 질문)를 올리면 PC나 휴대폰 브라우저에서 검토하고, 의견은 그 기획안을 올린 세션으로 돌아갑니다. Node 24, 순수 ESM, npm 의존성 없음, 빌드 없음.
+
+## 하는 일
+
+- `vb submit <boardDir>` 는 보드 폴더를 검사하고, 참조한 파일을 모두 영구 기록으로 복사한 뒤 URL을 출력합니다.
+- 검토함(`검토함`)은 열린 기획안을 제품(git remote)과 기능(브랜치 + 워크트리)별로 보여 줍니다.
+- 기획안 페이지에서 보드를 보고, 그림에 영역을 표시하고, 질문에 답하고, 의견을 쓰고, 승인(`이대로 진행`)하거나 닫습니다.
+- 의견은 소유 세션의 우편함에 쓰입니다. senpi 확장이 그 세션에 후속 턴으로 전달합니다.
+- 세션은 `vb reply`, `vb revise`, `vb close` 로 답합니다. 모든 단계는 이벤트이며 덮어쓰지 않습니다.
+- Tailscale에서는 같은 페이지가 `https://<machine>.<tailnet>.ts.net:4378` 로 제공되어 휴대폰으로도 검토할 수 있습니다.
+
+## 설치
+
+```powershell
+.\install.ps1                 # = node bin\vb.mjs install
+.\install.ps1 --no-tailscale  # tailscale serve 생략
+.\install.ps1 --no-autostart  # HKCU Run 값 생략
+```
+
+단계는 순서대로 실행되며 각각 `written | unchanged | skipped | failed:<reason>` 를 보고합니다.
+
+| # | 단계 | 동작 |
+| --- | --- | --- |
+| 0 | `stop` | `/api/health` 가 응답하면 `/api/shutdown` 을 보내고 health가 실패할 때까지 기다림(최대 5초). |
+| 1 | `app` | `<home>/app` 을 지우고 `bin src web extension skill rules package.json` 을 복사. |
+| 2 | `launcher` | `<home>/launch-hidden.vbs` 작성. node를 `--max-semi-space-size=1 --max-old-space-size=128` 로 `<home>\app\src\server.mjs` 에 대해 숨김 실행. |
+| 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `omo-visual-board` = `wscript.exe "<home>\launch-hidden.vbs"`. |
+| 4 | `extension` | `<agentDir>/extensions/visual-board.ts` 로 복사. |
+| 5 | `skill` | `~/.agents/skills/visual-board/` 와 `~/.claude/skills/visual-board/` 를 `<app>/skill/` 로 교체. |
+| 6 | `rule` | `rules/visual-board.md` 를 `~/.claude/rules/visual-board.md` 로 복사. |
+| 7 | `config` | `tailscale status --json` 에서 `publicBase`, `pcTailnetIps`, `owner` 를 읽음. tailscale이 없거나 Running이 아니면 `null`, `[]`, `null`. |
+| 8 | `tailscale` | 443 보호 장치와 함께 4378 serve 핸들러 추가(Tailnet 참고). |
+| 9 | `server` | `launchServer()` 로 시작하고 `/api/health` 를 기다림(최대 10초). |
+
+마지막 줄은 `열린 omo 세션에서 /reload 하면 확장이 반영됩니다.` 입니다.
+
+`<home>` 은 `OMO_VISUAL_BOARD_HOME` 또는 `~/.omo-visual-board`. `<agentDir>` 은 `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` 또는 `~/.omo/agent`.
+
+`vb uninstall` 은 서버를 끄고, Run 값을 지우고, 확장, 스킬 폴더 두 개, 규칙을 지우고, 같은 보호 장치로 4378 핸들러를 끄고, `<home>/app`, 실행기, `config.json`, `server.json` 을 지웁니다. `<home>/data` 는 남기고 `data kept: <path>` 를 출력합니다.
+
+`vb doctor` 는 health, Run 값, 실행기, 앱 사본과 같은 확장, 스킬과 규칙 존재, 4378 핸들러 존재, AllowFunnel에 4378 키 없음, 현재 443 Web 항목과 AllowFunnel이 `config.baseline443` 과 같은지 확인합니다. `<check>: ok|fail <detail>` 을 출력하고 모두 ok일 때만 0으로 끝납니다.
+
+## 사용법 (CLI 표)
+
+`vb` 는 PATH에 없습니다. 에이전트는 `node "<home>/app/bin/vb.mjs" <command>` 로 실행하며, 서버와 CLI는 안내문에 이 접두어를 그대로 넣습니다. `--json` 은 사람용 줄 대신 응답 JSON을 그대로 출력합니다.
+
+| 명령 | 출력 | 종료 코드 |
+| --- | --- | --- |
+| `submit <boardDir> [--title t] [--note n] [--new]` | `id: <id>`, `url: <url>` (서버가 `existing` 을 주면 `note: already submitted` 추가) | 0; 2 잘못된 보드(오류는 stderr); 3 서버 연결 불가; 8 내용이 다른 열린 기획안 중복 |
+| `revise <id> <boardDir> [--note n]` | `id: <id>` `rev: <n>` `url: <url>` | 0; 2; 3; 4 없음; 5 닫힘 |
+| `reply <id> <text...>` (또는 `--file <path>`, `-` = stdin) | `ok <id> <status>` | 0; 3; 4; 5 |
+| `close <id> <summary...>` | `ok <id> closed`, 이어서 마지막 의견이 승인이면 `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>`, 아니면 `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 3; 4; 5 |
+| `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, 이벤트마다 한 블록 | 0; 3; 4 |
+| `list [--product p] [--feature f] [--status s]` | 항목마다 `<id>\t<status>\t<product.name>\t<branch>\t<title>` | 0; 3 |
+| `pending` | 대기 알림 문구 또는 `none` | 0; 3 |
+| `wait <id> [--timeout sec]` | `WAITING <id>`, 이어서 `FEEDBACK <id> <seq>` + 의견 메시지, 또는 `CLOSED <id>` | 0; 4; 6 시간 초과 |
+| `server status\|start\|stop\|restart` | `running pid=<pid> port=<port> version=<v>` 또는 `stopped` | 0; 7 꺼짐(status) |
+| `install [--no-tailscale] [--no-autostart]`, `uninstall`, `doctor` | `<step>: <result>` 줄 | 0 성공; 1 하나라도 실패 |
+
+종료 코드 8은 stderr에 `open proposal exists: <id> <url> - use: vb revise <id> <boardDir>, or vb submit --new` 를 출력합니다.
+
+`submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 `/api/shutdown` 후 다시 띄우고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `VB_URL` 은 기본 URL을 바꾸고, `VB_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `VB_WAIT_POLL_MS`(기본 2000)와 `VB_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
+
+Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들어 호출한 터미널이 닫혀도 살아남게 합니다. WMI가 실패하거나 env 키 중 `OMO_VISUAL_BOARD_` 또는 `VB_` 로 시작하는 것이 있으면 분리된 `spawn` 으로 대신합니다.
+
+## 보드 형식
+
+보드는 `board.json`(스키마 `visual-board/1`)과 그것이 참조하는 파일이 담긴 폴더입니다.
+
+```
+{ title: string (필수, 비어 있으면 안 됨),
+  lead?: string,
+  sections?: [{ title: string, desc?: string,
+    cards: [{ badge?, title?, layout?: 'one'|'two'|'', diagram?: boolean, gray?: boolean, note?,
+              frames: [[label, path], ...] (>= 1) }] }],
+  questions?: [{ id: /^[A-Za-z0-9_-]{1,40}$/ 고유, text, help?,
+    options: [{ value: /^[A-Za-z0-9_.-]{1,60}$/ 질문 안에서 고유, label, rec?: boolean, why? }] (>= 2) }],
+  commentPlaceholder?: string }
+```
+
+- 엄격합니다. 다른 키는 오류입니다. 프로토타입의 최상위 `id` 는 무시하고, `sideSession`(문자열)은 `정할 것` 위에 회색 메모로 보입니다.
+- 그림 라벨은 보드 전체에서 고유합니다. 표시는 라벨로 그림을 가리킵니다.
+- 그림 최대 60개, 질문 최대 30개. 그림이나 질문이 하나 이상 있어야 합니다.
+- 그림 경로는 로컬 파일만 됩니다. URL과 절대 경로는 오류(`download the image into the board dir`)이므로 기록은 보여 준 그림을 모두 간직합니다. 상대 경로, 슬래시만, `:` 없음, 빈 / `.` / `..` 조각 없음, 200자 이하, 확장자 `.png .jpg .jpeg .gif .webp .svg .mmd`, 보드 폴더 안의 일반 파일.
+- 모으는 파일: `board.json`, 참조된 그림 전부, 각 `x.svg` 옆에 `x.mmd` 가 있으면 그것도. 폴더를 훑지 않습니다. 파일 하나 20 MiB 이하, 합계 100 MiB 이하.
+- 오류는 영어로 한 줄에 하나씩, JSON 경로를 앞에 붙입니다. 예: `questions[1].options: must have at least 2 options`.
+
+동작하는 예시는 `skill/example/` 에 있습니다.
+
+## 데이터 구조
+
+```
+<home>/
+  app/                 저장소의 설치 사본
+  data/proposals/<id>/ 기록 (서버만 씀)
+    proposal.json      { v: 1, id, title, created, product, feature, session }, 한 번만, 마지막에 씀
+    revs/<n>/...       안마다 복사한 보드 파일
+    events/<seq6>-<type>.json
+    crops/<seq6>-<n>.png
+  inbox/<session>/<id>-<seq6>.json   기록 밖의 우편함. 전달 후 확장이 지움
+  logs/  config.json  server.json  launch-hidden.vbs
+```
+
+- id는 `YYMMDD-xxxx`. JSON은 모두 임시 파일에 쓴 뒤 이름을 바꿉니다. 안은 `revs/<n>.tmp-<rand>` 에 복사한 뒤 다 되면 이름을 바꾸고, 색인 재구성은 `proposal.json` 이 없는 폴더와 `*.tmp-*` 폴더를 무시합니다.
+- 이벤트: `submitted`, `feedback`, `reply`, `revised`, `closed`. 1부터 번호를 매기고 재사용하지 않습니다. `submitted` 와 `revised` 는 내용 `hash` 를 가집니다.
+- 상태: `closed` 가 있으면 `closed`, 아니면 마지막이 `feedback` 일 때 `theirs`(세션 차례, 승인이면 `approved`), 그 외는 `mine`(내 차례).
+- 소유자는 세션 id가 있는 마지막 이벤트의 세션입니다.
+- 열린 상태에서 같은 기능 + 제목으로 다시 올리면, 내용 hash가 같을 때 기존 기획안을 돌려주고 다르면 종료 코드 8입니다. `--new` 는 항상 새로 만듭니다.
+- 의견의 `delivery` 는 계산값입니다: `none`(소유자 없음), `pending`(우편함 파일 있음), `delivered`.
+- 제품 키는 정규화한 `origin` remote(소문자 `host/path`), 기능 키는 `<제품 키>#<브랜치>`, 개수와 알림의 범위는 워크트리 경로입니다.
+
+`config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json`: `{ "pid", "port", "started", "version" }`.
+
+## HTTP API
+
+서버는 `127.0.0.1:4377`. 모든 POST는 `content-type: application/json` 과 `x-vb: 1` 이 필요합니다(없으면 403). 본문 제한 30 MiB(넘으면 413). `/api/*` 응답은 `cache-control: no-store`, 안 파일은 `public, max-age=31536000, immutable`.
+
+| 메서드 | 경로 | 권한 | 응답 |
+| --- | --- | --- | --- |
+| GET | `/` | read | 검토함 페이지 |
+| GET | `/p/<id>` | read | 기획안 페이지 |
+| GET | `/web/<file>` | read | 정적 파일 |
+| GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | 파일. 경로 탈출은 403 |
+| GET | `/api/health` | read | `{ ok, name: 'omo-visual-board', version, pid, port }` |
+| GET | `/api/caps` | read | `{ access, open, targets }` |
+| GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts는 거르지 않은 전체 `{ mine, theirs, closed }`) |
+| GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
+| POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
+| POST | `/api/p/<id>/dismiss` | feedback | `{ ok, status: 'closed' }` |
+| POST | `/api/open` | open | `{ ok, cmd }` |
+| POST | `/api/proposals` | session | `{ summary, url, existing }` |
+| POST | `/api/p/<id>/revise` | session | `{ summary, url }` |
+| POST | `/api/p/<id>/reply` | session | `{ summary }` |
+| POST | `/api/p/<id>/close` | session | `{ summary }` |
+| GET | `/api/here?cwd=&session=[&start=1]` | session | `{ product, feature, mine, theirs, pending, notice, noticeKeys, footer }` |
+| POST | `/api/bye` | session | `{ ok }` |
+| POST | `/api/shutdown` | session | `{ ok }`, 이후 종료 |
+
+오류: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400(`details` 포함), 권한 없음 403 `{ error: 'forbidden' }`, `/api/open` URL이 30000자를 넘으면 413 `{ error: 'too_long' }`.
+
+`/api/open` 대상은 `web/targets.json`(ChatGPT, Claude, Claude 앱, Aside, 복사)에서 옵니다. PC 전용 대상은 `open` 권한이 필요합니다. Aside는 `--single-argument` 로 보드 URL을 받고, 나머지는 `rundll32 url.dll,FileProtocolHandler` 로 엽니다.
+
+포트를 이미 omo-visual-board 서버가 쓰고 있으면 `node src/server.mjs` 는 조용히 0으로 끝나고, 다른 프로그램이면 로그를 남기고 3으로 끝납니다.
+
+## 접근 권한
+
+요청마다 `local`, `pc`, `tailnet`, `reject` 중 하나로 분류합니다.
+
+1. 원격 주소가 루프백이 아니면 reject.
+2. `tailscale-funnel-request` 헤더가 있으면 reject.
+3. `x-forwarded-for` 가 없을 때 Host가 `127.0.0.1` 또는 `localhost` 면 local, 아니면 reject.
+4. 첫 XFF 항목이 `pcTailnetIps` 에 있으면 pc (tailscaled가 자기 PC 트래픽에는 신원 헤더를 빼먹을 수 있어 신원보다 먼저 확인).
+5. `tailscale-user-login` 이 없거나 `owner` 와 다르면 reject, 아니면 tailnet.
+
+| 권한 | 허용 |
+| --- | --- |
+| read, feedback | local, pc, tailnet |
+| open | local, pc |
+| session | local |
+
+그래서 tailnet의 휴대폰은 읽고 의견을 보낼 수 있지만, 세션처럼 제출하거나 닫거나 PC에서 프로그램을 띄울 수는 없습니다.
+
+## 세션 깨우기
+
+senpi 확장(`extension/visual-board.ts`)은 하위 세션이나 task member 세션에서는 아무것도 하지 않습니다. 일반 세션에서는:
+
+- 3초마다 `<home>/inbox/<session>/*.json` 을 읽습니다. 기획안이 아직 `theirs` 이거나 서버에 닿지 않으면 문구를 턴을 시작하는 후속 메시지로 전달하고 파일을 지웁니다. 메모리의 집합이 중복 전달을 막습니다.
+- 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `보드 내 차례 {mine} · 세션 차례 {theirs}` 가 나옵니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `vb server start` 를 실행합니다.
+- 알림: 이 워크트리에서 기다리는 의견 중 소유 세션이 살아 있지 않은 것(90초 동안 `/api/here` 호출 없음, 종료, 하위 세션, id 없음)은 세션마다 한 번 알립니다. 재개된 세션은 시작할 때 자기에게 온 답 안 한 의견을 다시 안내받습니다.
+- 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
+
+세션 id는 `VB_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다.
+
+## Tailnet
+
+- 포트 4378만 씁니다: `tailscale serve --bg --https=4378 http://127.0.0.1:4377`.
+- Funnel은 절대 쓰지 않습니다. 서버도 Funnel 요청을 거부합니다.
+- 443은 건드리지 않습니다. 설치는 먼저 `serve status --json` 을 저장하고, 4378을 추가한 뒤 443 Web 항목, AllowFunnel, TCP 443이 그대로인지 확인합니다. 하나라도 다르면 4378을 다시 끄고 `failed:443-guard` 를 보고합니다. 기준값은 `doctor` 용으로 `baseline443` 에 저장합니다.
+- 외부 URL은 `https://<machine>.<tailnet>.ts.net:4378/p/<id>` 꼴입니다.
+
+## 테스트
+
+```
+node --test "test/**/*.test.mjs"
+```
+
+테스트는 임시 home, 포트 0, `reg`·`tailscale`·`wscript` 가짜 실행기, 짧은 확인 간격을 씁니다. 실제 시간을 기다리지 않고, 실제 home, agent 폴더, tailscale도 건드리지 않습니다.
+
+## 한계
+
+- 설치, 자동 시작, 서버 실행은 Windows 전용입니다.
+- 저장소에 remote가 생기기 전에 제출한 기획안은 `local/<name>` 제품 키를 그대로 가집니다.
+- Orca 모바일 앱 안에서 휴대폰으로 누르는 동작은 기계로 검증하지 않았습니다.
+- 한 사람용입니다. tailnet 소유자 확인은 로그인 하나를 가정합니다.
+- `/api/open` URL은 30000자로 제한됩니다(Windows 명령줄 한도). 더 긴 내용은 복사로 대신합니다.
