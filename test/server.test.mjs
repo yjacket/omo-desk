@@ -53,6 +53,7 @@ async function withServer(t, options = {}) {
 		port: 0,
 		config: { v: 1, port: 0, publicBase: null, pcTailnetIps: ["100.64.0.9"], ...(options.config || {}) },
 		...(options.now ? { now: options.now } : {}),
+		...(options.asidePath ? { asidePath: options.asidePath } : {}),
 	});
 	const { port } = await server.listen();
 	t.after(async () => {
@@ -98,6 +99,30 @@ async function submit(ctx, { srcDir, session = "s1", title = "기획안", extra 
 
 function git(cwd, ...args) {
 	return execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+}
+
+function waitForText(file, pattern, ms = 3000) {
+	const read = () => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "");
+	if (pattern.test(read())) return Promise.resolve(read());
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	const signal = AbortSignal.timeout(ms);
+	return new Promise((resolve, reject) => {
+		let watcher;
+		const onAbort = () => {
+			watcher?.close();
+			reject(new Error(`log never matched ${pattern}`));
+		};
+		const done = (text) => {
+			watcher?.close();
+			signal.removeEventListener("abort", onAbort);
+			resolve(text);
+		};
+		signal.addEventListener("abort", onAbort);
+		watcher = fs.watch(path.dirname(file), () => {
+			const text = read();
+			if (pattern.test(text)) done(text);
+		});
+	});
 }
 
 test("health reports the service with no-store", async (t) => {
@@ -537,4 +562,64 @@ test("here notice follows owner liveness, not delivery", async (t) => {
 
 	const seen = await (await fetch(hereUrl("fresh"))).json();
 	assert.ok(seen.notice && seen.notice.includes(id));
+});
+
+test("open with a missing aside exe is 404 not_installed and the server stays up", async (t) => {
+	const missing = path.join(REPO, "test", "no-such-aside.exe");
+	assert.ok(!fs.existsSync(missing), "the test needs a path that does not exist");
+	const ctx = await withServer(t, { asidePath: missing });
+	const dir = makeBoard(ctx.home);
+	const { body: sub } = await submit(ctx, { srcDir: dir });
+	const res = await postJson(ctx.base, "/api/open", { target: "aside", proposalId: sub.summary.id, dry: false });
+	assert.equal(res.status, 404);
+	assert.equal((await res.json()).error, "not_installed");
+	assert.match(fs.readFileSync(path.join(ctx.home, "logs", "server.log"), "utf8"), /aside not installed/);
+
+	const health = await fetch(`${ctx.base}/api/health`);
+	assert.equal(health.status, 200);
+	assert.equal((await health.json()).ok, true);
+});
+
+test("a spawn error is logged and does not take the server down", async (t) => {
+	const ctx = await withServer(t, { asidePath: path.join(REPO, "test") });
+	const dir = makeBoard(ctx.home);
+	const { body: sub } = await submit(ctx, { srcDir: dir });
+	const logged = waitForText(path.join(ctx.home, "logs", "server.log"), /open failed:/);
+	const res = await postJson(ctx.base, "/api/open", { target: "aside", proposalId: sub.summary.id, dry: false });
+	assert.equal(res.status, 200);
+	await logged;
+
+	const health = await fetch(`${ctx.base}/api/health`);
+	assert.equal(health.status, 200);
+});
+
+test("a failed inbox write still answers 200 with delivery none", async (t) => {
+	const ctx = await withServer(t);
+	const dir = makeBoard(ctx.home);
+	const { body: sub } = await submit(ctx, { srcDir: dir, session: "owner-inbox" });
+	const id = sub.summary.id;
+	fs.writeFileSync(path.join(ctx.home, "inbox"), "not a directory");
+
+	const res = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "인박스 실패" });
+	assert.equal(res.status, 200);
+	const fb = await res.json();
+	assert.equal(fb.ok, true);
+	assert.equal(fb.routed, "owner-inbox");
+	assert.equal(fb.delivery, "none");
+
+	const detail = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
+	const event = detail.events.find((item) => item.type === "feedback");
+	assert.ok(event, "the feedback event is stored");
+	assert.equal(event.seq, fb.seq);
+	assert.match(fs.readFileSync(path.join(ctx.home, "logs", "server.log"), "utf8"), /inbox write failed/);
+});
+
+test("server.json is written on listen with the package version", async (t) => {
+	const ctx = await withServer(t);
+	const parsed = JSON.parse(fs.readFileSync(path.join(ctx.home, "server.json"), "utf8"));
+	const pkg = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8"));
+	assert.equal(parsed.version, pkg.version);
+	assert.equal(parsed.port, ctx.port);
+	assert.equal(parsed.pid, process.pid);
+	assert.equal(typeof parsed.started, "string");
 });

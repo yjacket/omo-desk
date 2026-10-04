@@ -53,7 +53,7 @@ function fakeCtx({ sessionId = SESSION, cwd = "C:/work/proj", hasUI = true } = {
 	return { ctx, statuses };
 }
 
-function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, fetchThrows = false, fsOverrides = {} } = {}) {
+function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, proposalStatus = 200, fetchThrows = false, fsOverrides = {}, spawn: spawnOverride } = {}) {
 	const tmp = makeTmpHome();
 	const fp = fakePi();
 	if (piCwd !== undefined) fp.pi.cwd = piCwd;
@@ -77,7 +77,7 @@ function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, 
 		}
 		if (parsed.pathname.startsWith("/api/p/")) {
 			const body = typeof state.proposal === "function" ? state.proposal(parsed) : state.proposal;
-			return { ok: true, status: 200, json: async () => body };
+			return { ok: proposalStatus >= 200 && proposalStatus < 300, status: proposalStatus, json: async () => body };
 		}
 		return { ok: true, status: 200, json: async () => ({ ok: true }) };
 	};
@@ -98,10 +98,12 @@ function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, 
 		},
 		fetch: fetchImpl,
 		fs: fsImpl,
-		spawn: (cmd, args, opts) => {
-			spawned.push({ cmd, args, opts });
-			return { unref() {} };
-		},
+		spawn:
+			spawnOverride ??
+			((cmd, args, opts) => {
+				spawned.push({ cmd, args, opts });
+				return { unref() {} };
+			}),
 	});
 	return {
 		home: tmp.home,
@@ -197,6 +199,83 @@ test("a payload the server calls mine is dropped without a message", async () =>
 	await s.tick(3000);
 	assert.equal(s.pi.sent.length, 0);
 	assert.equal(existsSync(path.join(s.inboxDir, INBOX_FILE)), false);
+	s.cleanup();
+});
+
+const flush = () => new Promise(setImmediate);
+
+test("two overlapping inbox ticks deliver the payload once", async () => {
+	let started = 0;
+	let release;
+	const gate = new Promise((resolve) => {
+		release = resolve;
+	});
+	const s = setup({
+		fsOverrides: {
+			readdir: async () => [INBOX_FILE],
+			readFile: async () => JSON.stringify(PAYLOAD),
+		},
+	});
+	s.state.proposal = () => {
+		started += 1;
+		return gate.then(() => ({ summary: { status: "theirs" } }));
+	};
+	await s.pi.emit("session_start", s.ctx);
+	s.writeInbox();
+	const first = s.handle.inbox();
+	await flush();
+	const second = s.handle.inbox();
+	await flush();
+	assert.equal(started, 1, "the second tick is skipped while the first one runs");
+	release();
+	await Promise.all([first, second]);
+	assert.equal(s.pi.sent.length, 1);
+	assert.equal(s.pi.sent[0].message.content, PAYLOAD.text);
+	assert.equal(existsSync(path.join(s.inboxDir, INBOX_FILE)), false);
+	s.cleanup();
+});
+
+test("a 500 from the proposal check delivers the feedback once and removes the file", async () => {
+	const s = setup({ proposalStatus: 500 });
+	await s.pi.emit("session_start", s.ctx);
+	s.writeInbox();
+	await s.tick(3000);
+	assert.equal(s.pi.sent.length, 1);
+	assert.equal(s.pi.sent[0].message.content, PAYLOAD.text);
+	assert.equal(existsSync(path.join(s.inboxDir, INBOX_FILE)), false, "the file is not kept: the delivery was made");
+	const check = s.fetchCalls.find((call) => call.url.includes("/api/p/"));
+	assert.ok(check.opts.signal instanceof AbortSignal, "every proposal fetch is bounded by a timeout");
+	await s.tick(3000);
+	assert.equal(s.pi.sent.length, 1, "the delivered set prevents a second delivery");
+	s.cleanup();
+});
+
+test("a spawn 'error' is logged, never thrown into senpi", async () => {
+	let onError;
+	let seen;
+	const logged = new Promise((resolve) => {
+		seen = resolve;
+	});
+	const s = setup({
+		fetchThrows: true,
+		spawn: () => ({
+			unref() {},
+			on(event, handler) {
+				if (event === "error") onError = handler;
+			},
+		}),
+		fsOverrides: {
+			appendFile: async (file, text) => {
+				await fsp.appendFile(file, text);
+				if (String(text).includes("ensure:")) seen();
+			},
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(typeof onError, "function", "the spawn gets an error listener");
+	assert.doesNotThrow(() => onError(new Error("spawn node ENOENT")));
+	await logged;
+	assert.match(readFileSync(path.join(s.home, "logs", "extension.log"), "utf8"), /ensure: spawn node ENOENT/);
 	s.cleanup();
 });
 

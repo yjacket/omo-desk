@@ -14,6 +14,8 @@
 	};
 	const MMD_PAD = 8;
 	const CROP_PAD = 0.35;
+	// Longest edge of an encoded crop. A big mark on a full-size screenshot must stay under the server's 5 MiB crop limit.
+	const CROP_MAX_PX = 1600;
 	const MIN_MARK_PX = 8;
 	const DEFAULT_HEADERS = { "content-type": "application/json", "x-vb": "1" };
 	const EVENT_LABELS = { submitted: "제출", feedback: "내 의견", reply: "세션 답", revised: "고친 안", closed: "끝남" };
@@ -532,15 +534,16 @@
 		const sy = Math.max(0, (mark.y - mark.h * CROP_PAD) * H);
 		const sw = Math.min(W - sx, mark.w * (1 + 2 * CROP_PAD) * W);
 		const sh = Math.min(H - sy, mark.h * (1 + 2 * CROP_PAD) * H);
+		const k = Math.min(1, CROP_MAX_PX / Math.max(sw, sh));
 		const c = document.createElement("canvas");
-		c.width = Math.max(1, Math.round(sw));
-		c.height = Math.max(1, Math.round(sh));
+		c.width = Math.max(1, Math.round(sw * k));
+		c.height = Math.max(1, Math.round(sh * k));
 		const g = c.getContext("2d");
 		g.fillStyle = "#fff";
 		g.fillRect(0, 0, c.width, c.height);
 		try {
 			g.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-			drawMark(g, mark.x * W - sx, mark.y * H - sy, mark.w * W, mark.h * H, n, Math.max(1, W / 1280));
+			drawMark(g, (mark.x * W - sx) * k, (mark.y * H - sy) * k, mark.w * W * k, mark.h * H * k, n, Math.max(1, (W * k) / 1280));
 			return c.toDataURL("image/png");
 		} catch (error) {
 			console.error("crop failed", mark.frame, error);

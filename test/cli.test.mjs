@@ -14,6 +14,7 @@ const WEB = path.join(REPO, "web");
 const BIN = path.join(REPO, "bin", "vb.mjs");
 const toSlash = (value) => value.replace(/\\/g, "/");
 const CLI_HINT = `node "${toSlash(BIN)}"`;
+const REPO_VERSION = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).version;
 
 function board() {
 	return {
@@ -79,7 +80,7 @@ function childEnv(home, base, extra = {}) {
 	return env;
 }
 
-function spawnCli(ctx, args, { cwd, env: extra } = {}) {
+function spawnCli(ctx, args, { cwd, env: extra, input } = {}) {
 	const child = spawn(process.execPath, [BIN, ...args], {
 		cwd: cwd ?? ctx.repo,
 		env: childEnv(ctx.home, ctx.base, extra),
@@ -91,6 +92,7 @@ function spawnCli(ctx, args, { cwd, env: extra } = {}) {
 	child.stderr.setEncoding("utf8");
 	child.stdout.on("data", (chunk) => (stdout += chunk));
 	child.stderr.on("data", (chunk) => (stderr += chunk));
+	if (input !== undefined) child.stdin.end(input);
 	const done = once(child, "close").then(([code]) => ({ code, stdout, stderr }));
 	return { child, done, text: () => ({ stdout, stderr }) };
 }
@@ -295,4 +297,152 @@ test("ensure against a foreign process on the configured port exits 3", async (t
 	const repo = makeGitRepo(tmp.home);
 	const result = await runCli({ home: tmp.home, base: null, repo }, ["list"]);
 	assert.equal(result.code, 3, result.stdout + result.stderr);
+});
+
+// A stand-in for <home>/app/src/server.mjs: it reports VB_FAKE_VERSION, records a
+// /api/shutdown hit, and marks the first non-health request it serves.
+const FAKE_APP_SOURCE = [
+	'import fs from "node:fs";',
+	'import http from "node:http";',
+	'import path from "node:path";',
+	"const home = process.env.OMO_VISUAL_BOARD_HOME;",
+	'const version = process.env.VB_FAKE_VERSION || "0.0.0";',
+	'const countFile = path.join(home, "fake-shutdowns");',
+	'const servedFile = path.join(home, "fake-served");',
+	'const config = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));',
+	'fs.writeFileSync(path.join(home, "fake.pid"), String(process.pid));',
+	"const handler = (req, res) => {",
+	'\tres.setHeader("content-type", "application/json");',
+	'\tif (req.url === "/api/shutdown") {',
+	'\t\tconst n = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, "utf8")) : 0;',
+	"\t\tfs.writeFileSync(countFile, String(n + 1));",
+	'\t\tres.end("{}");',
+	"\t\treturn;",
+	"\t}",
+	'\tif (req.url === "/api/health") {',
+	'\t\tres.end(JSON.stringify({ ok: true, name: "omo-visual-board", version }));',
+	"\t\treturn;",
+	"\t}",
+	"\tfs.writeFileSync(servedFile, req.url);",
+	'\tres.end(JSON.stringify({ items: [] }));',
+	"};",
+	"const start = (attempt) => {",
+	"\tconst server = http.createServer(handler);",
+	'\tserver.on("error", () => { if (attempt < 80) setTimeout(() => start(attempt + 1), 25); });',
+	'\tserver.listen(config.port, "127.0.0.1");',
+	"};",
+	"start(0);",
+].join("\n");
+
+async function waitForExit(pid, timeoutMs = 5000) {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return;
+		}
+		if (Date.now() >= deadline) return;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+}
+
+async function removeHome(tmp) {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			tmp.cleanup();
+			return;
+		} catch (error) {
+			if (attempt >= 40) throw error;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+	}
+}
+
+async function ensureCtx(t, appVersion = null) {
+	const tmp = makeTmpHome("vb-cli-ensure-");
+	const old = http.createServer((req, res) => {
+		res.setHeader("content-type", "application/json");
+		if (req.url === "/api/shutdown") {
+			fs.appendFileSync(path.join(tmp.home, "old-shutdowns"), "x");
+			res.end("{}");
+			setTimeout(() => old.close(), 150);
+			return;
+		}
+		if (req.url === "/api/health") {
+			res.end(JSON.stringify({ ok: true, name: "omo-visual-board", version: "0.0.0-installed" }));
+			return;
+		}
+		fs.appendFileSync(path.join(tmp.home, "old-served"), req.url);
+		res.end(JSON.stringify({ items: [] }));
+	});
+	await new Promise((resolve) => old.listen(0, "127.0.0.1", resolve));
+	const port = old.address().port;
+	fs.writeFileSync(
+		path.join(tmp.home, "config.json"),
+		JSON.stringify({ v: 1, port, publicBase: null, pcTailnetIps: [], owner: null }),
+	);
+	const appSrc = path.join(tmp.home, "app", "src");
+	fs.mkdirSync(appSrc, { recursive: true });
+	fs.writeFileSync(path.join(appSrc, "server.mjs"), FAKE_APP_SOURCE);
+	if (appVersion !== null) {
+		fs.writeFileSync(
+			path.join(tmp.home, "app", "package.json"),
+			JSON.stringify({ name: "omo-visual-board", version: appVersion }),
+		);
+	}
+	const repo = makeGitRepo(tmp.home);
+	t.after(async () => {
+		await new Promise((resolve) => old.close(resolve));
+		try {
+			const pid = Number(fs.readFileSync(path.join(tmp.home, "fake.pid"), "utf8"));
+			process.kill(pid);
+			await waitForExit(pid);
+		} catch {
+			// the fake app server never started
+		}
+		await removeHome(tmp);
+	});
+	return { home: tmp.home, base: `http://127.0.0.1:${port}`, repo };
+}
+
+test("ensure shuts down a stale server when the installed app matches the cli", { timeout: 30000 }, async (t) => {
+	const ctx = await ensureCtx(t, REPO_VERSION);
+	const result = await runCli(ctx, ["list"], { env: { VB_NO_ENSURE: undefined, VB_FAKE_VERSION: REPO_VERSION } });
+	assert.equal(result.code, 0, result.stdout + result.stderr);
+	assert.ok(!result.stderr.includes("differs"), result.stderr);
+	assert.ok(
+		fs.existsSync(path.join(ctx.home, "old-shutdowns")),
+		"the stale server was not shut down",
+	);
+	assert.ok(!fs.existsSync(path.join(ctx.home, "old-served")), "the stale server served the request");
+	assert.ok(
+		fs.existsSync(path.join(ctx.home, "fake-served")),
+		`the new server never served the request: ${result.stderr}`,
+	);
+});
+
+test("ensure warns once and does not shut down a server whose version still differs", { timeout: 30000 }, async (t) => {
+	const other = "0.0.0-installed";
+	const ctx = await ensureCtx(t, other);
+	const result = await runCli(ctx, ["list"], { env: { VB_NO_ENSURE: undefined, VB_FAKE_VERSION: other } });
+	assert.equal(result.code, 0, result.stdout + result.stderr);
+	assert.ok(result.stderr.includes(`server version ${other} differs from cli ${REPO_VERSION}`), result.stderr);
+	assert.equal((result.stderr.match(/differs from cli/g) || []).length, 1, result.stderr);
+	assert.ok(!fs.existsSync(path.join(ctx.home, "old-shutdowns")), "the running server was shut down");
+	assert.ok(!fs.existsSync(path.join(ctx.home, "fake-shutdowns")), "a new server was shut down");
+	assert.ok(
+		fs.existsSync(path.join(ctx.home, "old-served")),
+		"the running server did not serve the request",
+	);
+});
+
+test("reply with a dash reads the text from stdin", async (t) => {
+	const ctx = await setup(t);
+	const id = idOf(await runCli(ctx, ["submit", makeBoard(path.join(ctx.repo, "stdin")), "--title", "표준입력"]));
+	const reply = await runCli(ctx, ["reply", id, "-"], { input: "from stdin" });
+	assert.equal(reply.code, 0, reply.stdout + reply.stderr);
+	const show = await runCli(ctx, ["show", id]);
+	assert.ok(show.stdout.includes("from stdin"), show.stdout);
+	assert.ok(!show.stdout.includes("  -\n"), show.stdout);
 });

@@ -34,6 +34,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 	const resolveNode = () => (isNodeExe(execPath) ? execPath : findNode(env, platform));
 	const spawnChild = (node, wmiError) => {
 		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: homeDir(env), env });
+		child.on?.("error", () => {});
 		child.unref?.();
 		return { via: "spawn", pid: child.pid, ...(wmiError ? { wmiError } : {}) };
 	};

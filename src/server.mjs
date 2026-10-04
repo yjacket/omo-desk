@@ -93,7 +93,7 @@ function fail(code, message) {
 	return error;
 }
 
-export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", config = {}, now = () => new Date() } = {}) {
+export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", config = {}, now = () => new Date(), asidePath = null } = {}) {
 	if (!home) throw fail("bad_input", "home is required");
 	const cfg = { v: 1, port, publicBase: null, pcTailnetIps: [], owner: null, ...config };
 	const dir = {
@@ -106,7 +106,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 	const store = createStore({ dataDir: dir.data, inboxDir: dir.inbox, now });
 	const targets = readTargets(webDir);
 	const version = readVersion();
-	const aside = asideExe();
+	const aside = asidePath ?? asideExe();
 	const lastSeen = new Map();
 	const identityCache = new Map();
 	let actualPort = port;
@@ -455,7 +455,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 		if (owner != null) {
 			const board = store.board(id, event.rev);
 			const text = feedbackMessage({ summary, board, event, url: url(id), cropDir: proposalDir(id), cli });
-			store.writeInbox(owner, {
+			const payload = {
 				v: 1,
 				proposalId: id,
 				seq: event.seq,
@@ -463,7 +463,17 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 				url: url(id),
 				approved: event.verdict === "approve",
 				text,
-			});
+			};
+			try {
+				store.writeInbox(owner, payload);
+			} catch (error) {
+				try {
+					store.writeInbox(owner, payload);
+				} catch (again) {
+					appendLog(dir.logs, `inbox write failed: ${again && again.stack ? again.stack : again}`);
+					return sendJson(res, 200, { ok: true, seq: event.seq, status: summary.status, routed: owner, delivery: "none" });
+				}
+			}
 		}
 		return sendJson(res, 200, {
 			ok: true,
@@ -503,9 +513,14 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			cmd = ["rundll32", "url.dll,FileProtocolHandler", urlValue];
 		}
 		if (body.dry === true) return sendJson(res, 200, { ok: true, dry: true, cmd });
+		if (target.id === "aside" && !fs.existsSync(cmd[0])) {
+			appendLog(dir.logs, `open failed: aside not installed at ${cmd[0]}`);
+			return sendJson(res, 404, { error: "not_installed" });
+		}
 		if (cmd.length) {
 			try {
 				const child = spawn(cmd[0], cmd.slice(1), { detached: true, stdio: "ignore", windowsHide: true });
+				child.on("error", (error) => appendLog(dir.logs, `open failed: ${error.message}`));
 				child.unref?.();
 			} catch (error) {
 				appendLog(dir.logs, `open failed: ${error.message}`);
@@ -543,6 +558,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			const onListening = () => {
 				httpServer.removeListener("error", onError);
 				actualPort = httpServer.address().port;
+				writeServerJson(path.join(home, "server.json"), dir.logs, actualPort, version);
 				resolve({ port: actualPort });
 			};
 			httpServer.once("error", onError);
@@ -575,15 +591,15 @@ async function probeHealth(port) {
 	}
 }
 
-function writeServerJson(l, port) {
+function writeServerJson(file, logsDir, port, version) {
 	try {
-		fs.mkdirSync(path.dirname(l.serverJson), { recursive: true });
+		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(
-			l.serverJson,
-			JSON.stringify({ v: 1, name: NAME, port, pid: process.pid, started: new Date().toISOString() }),
+			file,
+			JSON.stringify({ v: 1, name: NAME, port, pid: process.pid, started: new Date().toISOString(), version }),
 		);
 	} catch (error) {
-		appendLog(l.logs, `could not write server.json: ${error.message}`);
+		appendLog(logsDir, `could not write server.json: ${error.message}`);
 	}
 }
 
@@ -598,8 +614,7 @@ async function main() {
 		config,
 	});
 	try {
-		const { port } = await server.listen();
-		writeServerJson(l, port);
+		await server.listen();
 	} catch (error) {
 		if (error && error.code === "EADDRINUSE") {
 			if (await probeHealth(wanted)) process.exit(0);

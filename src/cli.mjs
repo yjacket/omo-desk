@@ -176,7 +176,7 @@ async function cmdRevise(rest, json) {
 
 function replyText(flags, pos) {
 	if (flags.has("file")) return fs.readFileSync(String(flags.get("file")), "utf8");
-	if (pos.length === 1 && pos[0] === "-") return fs.readFileSync(0, "utf8");
+	if (pos.length === 2 && pos[1] === "-") return fs.readFileSync(0, "utf8");
 	return pos.slice(1).join(" ");
 }
 
