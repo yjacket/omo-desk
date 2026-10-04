@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { homeDir } from "./paths.mjs";
+import { homeDir, layout } from "./paths.mjs";
 
 export const SERVER_NODE_ARGS = ["--max-semi-space-size=1", "--max-old-space-size=128"];
 
@@ -11,6 +11,18 @@ export const WMI_CREATE_SCRIPT =
 	"$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}; " +
 	"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$env:VB_LAUNCH_CMD; CurrentDirectory=$env:VB_LAUNCH_CWD; ProcessStartupInformation=$si}; " +
 	"'{0} {1}' -f $r.ReturnValue, $r.ProcessId";
+
+// A detached child's 'error' (e.g. ENOENT) has no other listener, so it is swallowed here to keep
+// the launch contract promise-shaped. Leave a breadcrumb so the failure is not invisible.
+function logLaunchError(env, error) {
+	try {
+		const logs = layout(env).logs;
+		fs.mkdirSync(logs, { recursive: true });
+		fs.appendFileSync(path.join(logs, "launch.log"), `${new Date().toISOString()} ${error?.stack ?? error?.message ?? String(error)}\n`);
+	} catch {
+		// logging is best effort: it must never break the launch path
+	}
+}
 
 function quoteArg(arg) {
 	return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
@@ -34,7 +46,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 	const resolveNode = () => (isNodeExe(execPath) ? execPath : findNode(env, platform));
 	const spawnChild = (node, wmiError) => {
 		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: homeDir(env), env });
-		child.on?.("error", () => {});
+		child.on?.("error", (error) => logLaunchError(env, error));
 		child.unref?.();
 		return { via: "spawn", pid: child.pid, ...(wmiError ? { wmiError } : {}) };
 	};

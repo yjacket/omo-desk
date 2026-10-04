@@ -21,6 +21,8 @@
 .\install.ps1 --no-autostart  # HKCU Run 값 생략
 ```
 
+설치는 현재 폴더가 아니라 CLI가 들어 있는 체크아웃에서 복사합니다. 설치 사본(`<home>/app`)에서 실행하면 아무것도 멈추기 전에 거부합니다.
+
 단계는 순서대로 실행되며 각각 `written | unchanged | skipped | failed:<reason>` 를 보고합니다.
 
 | # | 단계 | 동작 |
@@ -63,7 +65,7 @@
 
 종료 코드 8은 stderr에 `open proposal exists: <id> <url> - use: vb revise <id> <boardDir>, or vb submit --new` 를 출력합니다.
 
-`submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 `/api/shutdown` 후 다시 띄우고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `VB_URL` 은 기본 URL을 바꾸고, `VB_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `VB_WAIT_POLL_MS`(기본 2000)와 `VB_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
+`submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 설치된 앱 버전이 CLI 버전과 같을 때만 `/api/shutdown` 후 다시 띄우고, 아니면 `server version <x> differs from cli <y>; run install to update` 경고를 내고 실행 중인 서버를 그대로 쓰고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `VB_URL` 은 기본 URL을 바꾸고, `VB_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `VB_WAIT_POLL_MS`(기본 2000)와 `VB_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
 
 Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들어 호출한 터미널이 닫혀도 살아남게 합니다. WMI가 실패하거나 env 키 중 `OMO_VISUAL_BOARD_` 또는 `VB_` 로 시작하는 것이 있으면 분리된 `spawn` 으로 대신합니다.
 
@@ -110,10 +112,10 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 - 상태: `closed` 가 있으면 `closed`, 아니면 마지막이 `feedback` 일 때 `theirs`(세션 차례, 승인이면 `approved`), 그 외는 `mine`(내 차례).
 - 소유자는 세션 id가 있는 마지막 이벤트의 세션입니다.
 - 열린 상태에서 같은 기능 + 제목으로 다시 올리면, 내용 hash가 같을 때 기존 기획안을 돌려주고 다르면 종료 코드 8입니다. `--new` 는 항상 새로 만듭니다.
-- 의견의 `delivery` 는 계산값입니다: `none`(소유자 없음), `pending`(우편함 파일 있음), `delivered`.
+- 의견의 `delivery` 는 계산값입니다: `none`(소유자 없음, 또는 우편함 쓰기 실패. 이벤트는 저장되고 서버가 한 번 재시도한 뒤 로그를 남김), `pending`(우편함 파일 있음), `delivered`.
 - 제품 키는 정규화한 `origin` remote(소문자 `host/path`), 기능 키는 `<제품 키>#<브랜치>`, 개수와 알림의 범위는 워크트리 경로입니다.
 
-`config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json`: `{ "pid", "port", "started", "version" }`.
+`config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json` 은 서버만 씁니다: `{ "v", "name", "port", "pid", "started", "version" }`. 설치는 쓰지 않습니다.
 
 ## HTTP API
 
@@ -140,7 +142,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | POST | `/api/bye` | session | `{ ok }` |
 | POST | `/api/shutdown` | session | `{ ok }`, 이후 종료 |
 
-오류: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400(`details` 포함), 권한 없음 403 `{ error: 'forbidden' }`, `/api/open` URL이 30000자를 넘으면 413 `{ error: 'too_long' }`.
+오류: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400(`details` 포함), 권한 없음 403 `{ error: 'forbidden' }`, `/api/open` URL이 30000자를 넘으면 413 `{ error: 'too_long' }`, Aside 실행 파일이 없으면 `/api/open` 은 404 `{ error: "not_installed" }`.
 
 `/api/open` 대상은 `web/targets.json`(ChatGPT, Claude, Claude 앱, Aside, 복사)에서 옵니다. PC 전용 대상은 `open` 권한이 필요합니다. Aside는 `--single-argument` 로 보드 URL을 받고, 나머지는 `rundll32 url.dll,FileProtocolHandler` 로 엽니다.
 
