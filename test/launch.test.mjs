@@ -22,6 +22,9 @@ function fakeSpawn(plan) {
 		child.unref = () => {
 			call.unrefed = true;
 		};
+		if (step.error !== undefined) {
+			process.nextTick(() => child.emit("error", step.error));
+		}
 		if (step.close !== undefined) {
 			process.nextTick(() => {
 				if (step.out !== undefined) child.stdout.emit("data", step.out);
@@ -85,6 +88,14 @@ test("a WMI failure falls back to the plain spawn and reports wmiError", async (
 	assert.deepEqual(fake.calls[1].args.slice(0, SERVER_NODE_ARGS.length), SERVER_NODE_ARGS);
 	assert.equal(fake.calls[1].options.detached, true);
 	assert.equal(fake.calls[1].options.cwd, homeDir(env));
+});
+
+test("a child 'error' event stays caught and the spawn result still resolves", async () => {
+	const fake = fakeSpawn(() => ({ pid: 55, error: new Error("spawn boom") }));
+	const result = await launchServer({ env: {}, platform: "linux", spawnImpl: fake.impl });
+	assert.equal(result.via, "spawn");
+	assert.equal(result.pid, 55);
+	await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("a non-win32 platform uses the plain spawn without powershell", async () => {
