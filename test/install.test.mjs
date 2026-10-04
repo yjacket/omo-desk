@@ -103,7 +103,8 @@ function fakeSpawn(onSpawn) {
 	return { impl, calls };
 }
 
-function fakeFetch() {
+/** The server answers 403 unless a shutdown carries postGuard's two headers, and keeps running. */
+function fakeFetch({ stubborn = false } = {}) {
 	const state = { healthy: false };
 	const calls = [];
 	const impl = async (url, init) => {
@@ -113,7 +114,10 @@ function fakeFetch() {
 			return { ok: true, json: async () => ({ ok: true }) };
 		}
 		if (url.endsWith("/api/shutdown")) {
-			state.healthy = false;
+			const headers = init?.headers ?? {};
+			const guarded = init?.method === "POST" && String(headers["content-type"]).startsWith("application/json") && headers["x-vb"] === "1";
+			if (!guarded) return { ok: false, status: 403, json: async () => ({ ok: false }) };
+			if (!stubborn) state.healthy = false;
 			return { ok: true, json: async () => ({ ok: true }) };
 		}
 		throw new Error(`unexpected fetch ${url}`);
@@ -121,7 +125,7 @@ function fakeFetch() {
 	return { impl, calls, state };
 }
 
-function setup() {
+function setup({ stubborn = false } = {}) {
 	const tmp = makeTmpHome();
 	const home = path.join(tmp.home, "home");
 	const userHome = path.join(tmp.home, "user");
@@ -132,7 +136,7 @@ function setup() {
 	const env = { OMO_VISUAL_BOARD_HOME: home, OMO_CODING_AGENT_DIR: agent };
 	const reg = fakeReg();
 	const ts = fakeTailscale();
-	const fetch = fakeFetch();
+	const fetch = fakeFetch({ stubborn });
 	const spawn = fakeSpawn(() => {
 		fetch.state.healthy = true;
 	});
@@ -215,6 +219,29 @@ test("a second install reports unchanged except app and server", async () => {
 		assert.equal(lineFor(lines, "tailscale"), "tailscale: unchanged");
 		assert.equal(lineFor(lines, "server"), "server: started:4321");
 		assert.equal(s.ts.state.off, 0);
+
+		const shutdown = s.fetch.calls.find((call) => call.url.endsWith("/api/shutdown"));
+		assert.equal(shutdown.init.method, "POST");
+		assert.equal(shutdown.init.headers["content-type"], "application/json");
+		assert.equal(shutdown.init.headers["x-vb"], "1");
+		assert.equal(shutdown.init.body, "{}");
+	} finally {
+		s.tmp.cleanup();
+	}
+});
+
+test("a server that ignores shutdown aborts before the app dir is touched", async () => {
+	const s = setup({ stubborn: true });
+	try {
+		s.fetch.state.healthy = true;
+		let clock = 0;
+		const opts = { ...s.opts, now: () => (clock += 1000), sleep: async () => {} };
+		const { ok, lines } = await install(opts);
+		assert.equal(ok, false);
+		assert.equal(lineFor(lines, "stop"), "stop: failed:server did not stop");
+		assert.equal(lines.some((line) => line.startsWith("app:")), false);
+		assert.equal(fs.existsSync(path.join(s.home, "app")), false);
+		assert.equal(s.spawn.calls.length, 0);
 	} finally {
 		s.tmp.cleanup();
 	}
