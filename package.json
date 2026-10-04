@@ -1,0 +1,16 @@
+{
+  "name": "omo-visual-board",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Review inbox for omo/senpi sessions: proposals with screens, ER and flow diagrams, feedback marks, and a per-product history.",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "vb": "bin/vb.mjs"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  }
+}
