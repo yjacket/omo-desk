@@ -23,6 +23,7 @@ const CHILD_ENV = ["OMO_SENPI_TASK_RPC_CHILD", "SENPI_TASK_MEMBER", "SENPI_TASK_
 const INBOX_MS = 3000;
 const STATUS_MS = 30000;
 const SPAWN_COOLDOWN_MS = 120_000;
+const FETCH_TIMEOUT_MS = 5000;
 const DEFAULT_PORT = 4377;
 const SERVER_DOWN = "보드 서버 꺼짐";
 
@@ -112,6 +113,7 @@ export function createVisualBoard(pi, deps = {}) {
 		lastSpawnAt = now();
 		const node = await resolveNode();
 		const child = spawnImpl(node, [path.join(home, "app", "bin", "vb.mjs"), "server", "start"], { detached: true, stdio: "ignore", windowsHide: true });
+		child?.on?.("error", (e) => void log("ensure: " + e.message));
 		child?.unref?.();
 	});
 
@@ -145,7 +147,7 @@ export function createVisualBoard(pi, deps = {}) {
 		const url = `${await baseUrl()}/api/here?cwd=${encodeURIComponent(cwd)}&session=${encodeURIComponent(sessionId)}${start ? "&start=1" : ""}`;
 		let response;
 		try {
-			response = await doFetch(url, { headers: { accept: "application/json" } });
+			response = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 		} catch (error) {
 			await log(`status: ${String((error && error.message) || error)}`);
 			await setFooter(SERVER_DOWN);
@@ -171,7 +173,7 @@ export function createVisualBoard(pi, deps = {}) {
 		}
 	}
 
-	const inbox = safe("inbox", async () => {
+	const drainInbox = safe("inbox", async () => {
 		if (!sessionId) return;
 		const dir = path.join(home, "inbox", safeSegment(sessionId));
 		let names;
@@ -204,11 +206,9 @@ export function createVisualBoard(pi, deps = {}) {
 			}
 			let theirs = false;
 			try {
-				const response = await doFetch(`${await baseUrl()}/api/p/${encodeURIComponent(payload.proposalId)}?since=${encodeURIComponent(payload.seq)}`, { headers: { accept: "application/json" } });
-				if (response && response.ok) {
-					const body = await response.json();
-					theirs = body?.summary?.status === "theirs";
-				}
+				const response = await doFetch(`${await baseUrl()}/api/p/${encodeURIComponent(payload.proposalId)}?since=${encodeURIComponent(payload.seq)}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+				const body = response?.ok ? await response.json() : undefined;
+				theirs = !response?.ok || body?.summary?.status === "theirs";
 			} catch {
 				// the server is unreachable: deliver rather than lose the feedback
 				theirs = true;
@@ -224,6 +224,19 @@ export function createVisualBoard(pi, deps = {}) {
 			await removeQuietly(file);
 		}
 		if (deliveredAny) await status(false);
+	});
+
+	let inboxRunning = false;
+
+	/** A slow tick must not overlap the next one: both would deliver the same feedback. */
+	const inbox = safe("inbox", async () => {
+		if (inboxRunning) return;
+		inboxRunning = true;
+		try {
+			await drainInbox();
+		} finally {
+			inboxRunning = false;
+		}
 	});
 
 	function start() {
@@ -269,6 +282,7 @@ export function createVisualBoard(pi, deps = {}) {
 				method: "POST",
 				headers: { "content-type": "application/json", "x-vb": "1" },
 				body: JSON.stringify({ session: sessionId }),
+				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 			});
 		} catch {
 			// the server is already gone
