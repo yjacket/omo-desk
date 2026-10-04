@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readConfig } from "./paths.mjs";
+import { homeDir, readConfig } from "./paths.mjs";
 import { launchServer } from "./launch.mjs";
 
 const NAME = "omo-visual-board";
@@ -44,6 +44,17 @@ function ownVersion() {
 	return null;
 }
 
+/** The version of the app installed under <home>/app; null when it is missing or unreadable. */
+function installedVersion(env) {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(path.join(homeDir(env), "app", "package.json"), "utf8"));
+		if (parsed && typeof parsed.version === "string") return parsed.version;
+	} catch {
+		// a missing installed package.json only means the version check is skipped
+	}
+	return null;
+}
+
 async function probe(env) {
 	try {
 		const response = await fetch(baseUrl(env) + "/api/health", { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
@@ -61,16 +72,30 @@ function foreign(env) {
 	return error;
 }
 
-async function start(env) {
+async function start(env, version) {
 	await launchServer({ env });
 	const waitMs = Number(env.VB_ENSURE_POLL_MS) || 500;
 	for (let attempt = 0; attempt < ENSURE_ATTEMPTS; attempt++) {
 		await sleep(waitMs);
 		const health = await probe(env);
 		if (health && health.name !== NAME) throw foreign(env);
-		if (health && health.ok === true) return true;
+		if (health && health.ok === true) {
+			if (version !== null && health.version !== version) {
+				process.stderr.write(`server version ${health.version} differs from cli ${version}\n`);
+			}
+			return true;
+		}
 	}
 	return false;
+}
+
+/** Wait, at most ENSURE_ATTEMPTS polls, for a server that was just shut down to stop answering health. */
+async function waitForShutdown(env) {
+	const waitMs = Number(env.VB_ENSURE_POLL_MS) || 500;
+	for (let attempt = 0; attempt < ENSURE_ATTEMPTS; attempt++) {
+		await sleep(waitMs);
+		if (!(await probe(env))) return;
+	}
 }
 
 /**
@@ -83,9 +108,16 @@ export async function ensure(env = process.env) {
 	if (env.VB_NO_ENSURE === "1") return Boolean(health && health.ok === true);
 	const version = ownVersion();
 	if (health && version !== null && health.version !== version) {
-		await api("POST", "/api/shutdown", {}, env);
-		return start(env);
+		// Only a stale install of our own version is safe to shut down; anything else
+		// means the CLI is running from a different checkout than the installed app.
+		if (installedVersion(env) === version) {
+			await api("POST", "/api/shutdown", {}, env);
+			await waitForShutdown(env);
+			return start(env, version);
+		}
+		process.stderr.write(`server version ${health.version} differs from cli ${version}; run install to update\n`);
+		return true;
 	}
 	if (health) return true;
-	return start(env);
+	return start(env, version);
 }
