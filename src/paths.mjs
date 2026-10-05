@@ -14,7 +14,7 @@ const CONFIG_DEFAULT = {
 };
 
 export function homeDir(env = process.env) {
-	return env.OMO_VISUAL_BOARD_HOME || path.join(os.homedir(), ".omo-visual-board");
+	return env.OMO_DESK_HOME || path.join(os.homedir(), ".omo-desk");
 }
 
 export function layout(env = process.env) {

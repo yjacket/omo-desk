@@ -9,7 +9,7 @@ const WMI_TIMEOUT_MS = 30_000;
 
 export const WMI_CREATE_SCRIPT =
 	"$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}; " +
-	"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$env:VB_LAUNCH_CMD; CurrentDirectory=$env:VB_LAUNCH_CWD; ProcessStartupInformation=$si}; " +
+	"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$env:DESK_LAUNCH_CMD; CurrentDirectory=$env:DESK_LAUNCH_CWD; ProcessStartupInformation=$si}; " +
 	"'{0} {1}' -f $r.ReturnValue, $r.ProcessId";
 
 // A detached child's 'error' (e.g. ENOENT) has no other listener, so it is swallowed here to keep
@@ -38,7 +38,7 @@ function findNode(env, platform) {
 		const candidate = path.join(dir, platform === "win32" ? "node.exe" : "node");
 		if (dir && fs.existsSync(candidate)) return candidate;
 	}
-	throw new Error("Node executable not found on PATH for the visual-board server");
+	throw new Error("Node executable not found on PATH for the omo-desk server");
 }
 
 export function launchServer({ env = process.env, script = path.join(homeDir(env), "app", "src", "server.mjs"), execPath = process.execPath, platform = process.platform, spawnImpl = spawn } = {}) {
@@ -52,7 +52,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 	};
 	const sandboxed = Object.keys(env).some((key) => {
 		const upper = key.toUpperCase();
-		return upper.startsWith("OMO_VISUAL_BOARD_") || upper.startsWith("VB_");
+		return upper.startsWith("OMO_DESK_") || upper.startsWith("DESK_");
 	});
 	if (platform !== "win32" || sandboxed) return Promise.resolve().then(() => spawnChild(resolveNode()));
 	return new Promise((resolve, reject) => {
@@ -77,7 +77,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 			ps = spawnImpl("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WMI_CREATE_SCRIPT], {
 				stdio: ["ignore", "pipe", "ignore"],
 				windowsHide: true,
-				env: { ...env, VB_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), VB_LAUNCH_CWD: homeDir(env) },
+				env: { ...env, DESK_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), DESK_LAUNCH_CWD: homeDir(env) },
 			});
 		} catch (error) {
 			finish(spawnChild(node, `spawn: ${error.message}`));

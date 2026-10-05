@@ -1,4 +1,4 @@
-# omo-visual-board
+# omo-desk
 
 [English](README.md) | 한국어
 
@@ -6,17 +6,17 @@
 
 ## 하는 일
 
-- `vb submit <boardDir>` 는 보드 폴더를 검사하고, 참조한 파일을 모두 영구 기록으로 복사한 뒤 URL을 출력합니다.
+- `desk submit <boardDir>` 는 보드 폴더를 검사하고, 참조한 파일을 모두 영구 기록으로 복사한 뒤 URL을 출력합니다.
 - 검토함(`검토함`)은 열린 기획안을 제품(git remote)과 기능(브랜치 + 워크트리)별로 보여 줍니다.
 - 기획안 페이지에서 보드를 보고, 그림에 영역을 표시하고, 질문에 답하고, 의견을 쓰고, 수정안을 요청(`재요청`)하거나 승인(`승인`)하거나 닫습니다.
 - 의견은 소유 세션의 우편함에 쓰입니다. senpi 확장이 그 세션에 후속 턴으로 전달합니다.
-- 세션은 `vb reply`, `vb revise`, `vb close` 로 답합니다. 모든 단계는 이벤트이며 덮어쓰지 않습니다.
+- 세션은 `desk reply`, `desk revise`, `desk close` 로 답합니다. 모든 단계는 이벤트이며 덮어쓰지 않습니다.
 - Tailscale에서는 같은 페이지가 `https://<machine>.<tailnet>.ts.net:4378` 로 제공되어 휴대폰으로도 검토할 수 있습니다.
 
 ## 설치
 
 ```powershell
-.\install.ps1                 # = node bin\vb.mjs install
+.\install.ps1                 # = node bin\desk.mjs install
 .\install.ps1 --no-tailscale  # tailscale serve 생략
 .\install.ps1 --no-autostart  # HKCU Run 값 생략
 ```
@@ -30,8 +30,8 @@
 | 0 | `stop` | `/api/health` 가 응답하면 `/api/shutdown` 을 보내고 health가 실패할 때까지 기다림(최대 5초). |
 | 1 | `app` | `<home>/app` 을 지우고 `bin src web extension skill rules package.json` 을 복사. |
 | 2 | `launcher` | `<home>/launch-hidden.vbs` 작성. node를 `--max-semi-space-size=1 --max-old-space-size=128` 로 `<home>\app\src\server.mjs` 에 대해 숨김 실행. |
-| 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `omo-visual-board` = `wscript.exe "<home>\launch-hidden.vbs"`. |
-| 4 | `extension` | `<agentDir>/extensions/visual-board.ts` 로 복사. |
+| 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `omo-desk` = `wscript.exe "<home>\launch-hidden.vbs"`. |
+| 4 | `extension` | `<agentDir>/extensions/omo-desk.ts` 로 복사. |
 | 5 | `skill` | `~/.agents/skills/visual-board/` 와 `~/.claude/skills/visual-board/` 를 `<app>/skill/` 로 교체. |
 | 6 | `rule` | `rules/visual-board.md` 를 `~/.claude/rules/visual-board.md` 로 복사. |
 | 7 | `config` | `tailscale status --json` 에서 `publicBase`, `pcTailnetIps`, `owner` 를 읽음. tailscale이 없거나 Running이 아니면 `null`, `[]`, `null`. |
@@ -40,15 +40,15 @@
 
 마지막 줄은 `열린 omo 세션에서 /reload 하면 확장이 반영됩니다.` 입니다.
 
-`<home>` 은 `OMO_VISUAL_BOARD_HOME` 또는 `~/.omo-visual-board`. `<agentDir>` 은 `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` 또는 `~/.omo/agent`.
+`<home>` 은 `OMO_DESK_HOME` 또는 `~/.omo-desk`. `<agentDir>` 은 `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` 또는 `~/.omo/agent`.
 
-`vb uninstall` 은 서버를 끄고, Run 값을 지우고, 확장, 스킬 폴더 두 개, 규칙을 지우고, 같은 보호 장치로 4378 핸들러를 끄고, `<home>/app`, 실행기, `config.json`, `server.json` 을 지웁니다. `<home>/data` 는 남기고 `data kept: <path>` 를 출력합니다.
+`desk uninstall` 은 서버를 끄고, Run 값을 지우고, 확장, 스킬 폴더 두 개, 규칙을 지우고, 같은 보호 장치로 4378 핸들러를 끄고, `<home>/app`, 실행기, `config.json`, `server.json` 을 지웁니다. `<home>/data` 는 남기고 `data kept: <path>` 를 출력합니다.
 
-`vb doctor` 는 health, Run 값, 실행기, 앱 사본과 같은 확장, 스킬과 규칙 존재, 4378 핸들러 존재, AllowFunnel에 4378 키 없음, 현재 443 Web 항목과 AllowFunnel이 `config.baseline443` 과 같은지 확인합니다. `<check>: ok|fail <detail>` 을 출력하고 모두 ok일 때만 0으로 끝납니다.
+`desk doctor` 는 health, Run 값, 실행기, 앱 사본과 같은 확장, 스킬과 규칙 존재, 4378 핸들러 존재, AllowFunnel에 4378 키 없음, 현재 443 Web 항목과 AllowFunnel이 `config.baseline443` 과 같은지 확인합니다. `<check>: ok|fail <detail>` 을 출력하고 모두 ok일 때만 0으로 끝납니다.
 
 ## 사용법 (CLI 표)
 
-`vb` 는 PATH에 없습니다. 에이전트는 `node "<home>/app/bin/vb.mjs" <command>` 로 실행하며, 서버와 CLI는 안내문에 이 접두어를 그대로 넣습니다. `--json` 은 사람용 줄 대신 응답 JSON을 그대로 출력합니다.
+`desk` 는 PATH에 없습니다. 에이전트는 `node "<home>/app/bin/desk.mjs" <command>` 로 실행하며, 서버와 CLI는 안내문에 이 접두어를 그대로 넣습니다. `--json` 은 사람용 줄 대신 응답 JSON을 그대로 출력합니다.
 
 | 명령 | 출력 | 종료 코드 |
 | --- | --- | --- |
@@ -63,11 +63,11 @@
 | `server status\|start\|stop\|restart` | `running pid=<pid> port=<port> version=<v>` 또는 `stopped` | 0; 7 꺼짐(status) |
 | `install [--no-tailscale] [--no-autostart]`, `uninstall`, `doctor` | `<step>: <result>` 줄 | 0 성공; 1 하나라도 실패 |
 
-종료 코드 8은 stderr에 `open proposal exists: <id> <url> - use: vb revise <id> <boardDir>, or vb submit --new` 를 출력합니다.
+종료 코드 8은 stderr에 `open proposal exists: <id> <url> - use: desk revise <id> <boardDir>, or desk submit --new` 를 출력합니다.
 
-`submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 설치된 앱 버전이 CLI 버전과 같을 때만 `/api/shutdown` 후 다시 띄우고, 아니면 `server version <x> differs from cli <y>; run install to update` 경고를 내고 실행 중인 서버를 그대로 쓰고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `VB_URL` 은 기본 URL을 바꾸고, `VB_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `VB_WAIT_POLL_MS`(기본 2000)와 `VB_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
+`submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 설치된 앱 버전이 CLI 버전과 같을 때만 `/api/shutdown` 후 다시 띄우고, 아니면 `server version <x> differs from cli <y>; run install to update` 경고를 내고 실행 중인 서버를 그대로 쓰고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `DESK_URL` 은 기본 URL을 바꾸고, `DESK_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `DESK_WAIT_POLL_MS`(기본 2000)와 `DESK_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
 
-Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들어 호출한 터미널이 닫혀도 살아남게 합니다. WMI가 실패하거나 env 키 중 `OMO_VISUAL_BOARD_` 또는 `VB_` 로 시작하는 것이 있으면 분리된 `spawn` 으로 대신합니다.
+Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들어 호출한 터미널이 닫혀도 살아남게 합니다. WMI가 실패하거나 env 키 중 `OMO_DESK_` 또는 `DESK_` 로 시작하는 것이 있으면 분리된 `spawn` 으로 대신합니다.
 
 ## 보드 형식
 
@@ -135,7 +135,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 
 ## HTTP API
 
-서버는 `127.0.0.1:4377`. 모든 POST는 `content-type: application/json` 과 `x-vb: 1` 이 필요합니다(없으면 403). 본문 제한 30 MiB(넘으면 413). `/api/*` 응답은 `cache-control: no-store`, 안 파일은 `public, max-age=31536000, immutable`.
+서버는 `127.0.0.1:4377`. 모든 POST는 `content-type: application/json` 과 `x-desk: 1` 이 필요합니다(없으면 403). 본문 제한 30 MiB(넘으면 413). `/api/*` 응답은 `cache-control: no-store`, 안 파일은 `public, max-age=31536000, immutable`.
 
 | 메서드 | 경로 | 권한 | 응답 |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | GET | `/web/<file>` | read | 정적 파일 |
 | GET | `/sw.js` | read | 서비스 워커(`Service-Worker-Allowed: /`, `cache-control: no-cache`) |
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | 파일. 경로 탈출은 403 |
-| GET | `/api/health` | read | `{ ok, name: 'omo-visual-board', version, pid, port }` |
+| GET | `/api/health` | read | `{ ok, name: 'omo-desk', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
 | GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts는 거르지 않은 전체 `{ mine, theirs, closed }`) |
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
@@ -166,7 +166,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 
 `/api/open` 대상은 `web/targets.json`(ChatGPT, Claude, Claude 앱, Aside, 복사)에서 옵니다. PC 전용 대상은 `open` 권한이 필요합니다. Aside는 `--single-argument` 로 보드 URL을 받고, 나머지는 `rundll32 url.dll,FileProtocolHandler` 로 엽니다.
 
-포트를 이미 omo-visual-board 서버가 쓰고 있으면 `node src/server.mjs` 는 조용히 0으로 끝나고, 다른 프로그램이면 로그를 남기고 3으로 끝납니다.
+포트를 이미 omo-desk 서버가 쓰고 있으면 `node src/server.mjs` 는 조용히 0으로 끝나고, 다른 프로그램이면 로그를 남기고 3으로 끝납니다.
 
 ## 접근 권한
 
@@ -188,14 +188,14 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 
 ## 세션 깨우기
 
-senpi 확장(`extension/visual-board.ts`)은 하위 세션이나 task member 세션에서는 아무것도 하지 않습니다. 일반 세션에서는:
+senpi 확장(`extension/omo-desk.ts`)은 하위 세션이나 task member 세션에서는 아무것도 하지 않습니다. 일반 세션에서는:
 
 - 3초마다 `<home>/inbox/<session>/*.json` 을 읽습니다. 기획안이 아직 `theirs` 이거나 서버에 닿지 않으면 문구를 턴을 시작하는 후속 메시지로 전달하고 파일을 지웁니다. 메모리의 집합이 중복 전달을 막습니다.
-- 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `보드 내 차례 {mine} · 세션 차례 {theirs}` 가 나옵니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `vb server start` 를 실행합니다.
+- 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `보드 내 차례 {mine} · 세션 차례 {theirs}` 가 나옵니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `desk server start` 를 실행합니다.
 - 알림: 이 워크트리에서 기다리는 의견 중 소유 세션이 살아 있지 않은 것(90초 동안 `/api/here` 호출 없음, 종료, 하위 세션, id 없음)은 세션마다 한 번 알립니다. 재개된 세션은 시작할 때 자기에게 온 답 안 한 의견을 다시 안내받습니다.
 - 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
 
-세션 id는 `VB_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다.
+세션 id는 `DESK_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다.
 
 ## 알림
 
@@ -204,8 +204,8 @@ senpi 확장(`extension/visual-board.ts`)은 하위 세션이나 task member 세
 | 계기 | 제목 | 본문 |
 | --- | --- | --- |
 | 새 기획안(`existing` 재제출은 제외) | `새 기획안 · <title>` | `<제품> · <브랜치>` |
-| `vb revise` | `수정본 <rev> · <title>` | 수정 메모, 없으면 `<제품> · <브랜치>` |
-| `vb reply` | `답이 왔습니다 · <title>` | 답 문구를 120자까지 |
+| `desk revise` | `수정본 <rev> · <title>` | 수정 메모, 없으면 `<제품> · <브랜치>` |
+| `desk reply` | `답이 왔습니다 · <title>` | 답 문구를 120자까지 |
 
 내가 보낸 의견과 닫기는 알리지 않습니다. 푸시는 HTTP 응답을 보낸 뒤에 보내므로 응답을 늦추지 않고, 보내기에 실패하면 `logs/server.log` 에 남깁니다.
 

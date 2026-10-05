@@ -1,1 +1,1 @@
-node "$PSScriptRoot\bin\vb.mjs" install @args
+node "$PSScriptRoot\bin\desk.mjs" install @args

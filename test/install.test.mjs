@@ -15,14 +15,14 @@ function makeRepo(root) {
 	for (const dir of ["bin", "src", "web", "extension", path.join("skill", "example"), "rules"]) {
 		fs.mkdirSync(path.join(repo, dir), { recursive: true });
 	}
-	fs.writeFileSync(path.join(repo, "bin", "vb.mjs"), "#!/usr/bin/env node\n");
+	fs.writeFileSync(path.join(repo, "bin", "desk.mjs"), "#!/usr/bin/env node\n");
 	fs.writeFileSync(path.join(repo, "src", "server.mjs"), "export {};\n");
 	fs.writeFileSync(path.join(repo, "web", "targets.json"), "[]\n");
-	fs.writeFileSync(path.join(repo, "extension", "visual-board.ts"), "export const x = 1;\n");
+	fs.writeFileSync(path.join(repo, "extension", "omo-desk.ts"), "export const x = 1;\n");
 	fs.writeFileSync(path.join(repo, "skill", "SKILL.md"), "# visual-board\n");
 	fs.writeFileSync(path.join(repo, "skill", "example", "board.json"), "{}\n");
 	fs.writeFileSync(path.join(repo, "rules", "visual-board.md"), "# rules\n");
-	fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ name: "omo-visual-board", version: "0.1.0" }));
+	fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ name: "omo-desk", version: "0.1.0" }));
 	return repo;
 }
 
@@ -115,7 +115,7 @@ function fakeFetch({ stubborn = false } = {}) {
 		}
 		if (url.endsWith("/api/shutdown")) {
 			const headers = init?.headers ?? {};
-			const guarded = init?.method === "POST" && String(headers["content-type"]).startsWith("application/json") && headers["x-vb"] === "1";
+			const guarded = init?.method === "POST" && String(headers["content-type"]).startsWith("application/json") && headers["x-desk"] === "1";
 			if (!guarded) return { ok: false, status: 403, json: async () => ({ ok: false }) };
 			if (!stubborn) state.healthy = false;
 			return { ok: true, json: async () => ({ ok: true }) };
@@ -133,7 +133,7 @@ function setup({ stubborn = false } = {}) {
 	fs.mkdirSync(home, { recursive: true });
 	fs.mkdirSync(userHome, { recursive: true });
 	const repo = makeRepo(tmp.home);
-	const env = { OMO_VISUAL_BOARD_HOME: home, OMO_CODING_AGENT_DIR: agent };
+	const env = { OMO_DESK_HOME: home, OMO_CODING_AGENT_DIR: agent };
 	const reg = fakeReg();
 	const ts = fakeTailscale();
 	const fetch = fakeFetch({ stubborn });
@@ -173,7 +173,7 @@ test("fresh install writes every step and copies the app", async () => {
 
 		assert.ok(fs.existsSync(path.join(s.home, "app", "src", "server.mjs")));
 		assert.ok(fs.existsSync(path.join(s.home, "app", "package.json")));
-		assert.ok(fs.existsSync(path.join(s.agent, "extensions", "visual-board.ts")));
+		assert.ok(fs.existsSync(path.join(s.agent, "extensions", "omo-desk.ts")));
 		assert.ok(fs.existsSync(path.join(s.userHome, ".agents", "skills", "visual-board", "SKILL.md")));
 		assert.ok(fs.existsSync(path.join(s.userHome, ".agents", "skills", "visual-board", "example", "board.json")));
 		assert.ok(fs.existsSync(path.join(s.userHome, ".claude", "skills", "visual-board", "SKILL.md")));
@@ -221,7 +221,7 @@ test("a second install reports unchanged except app and server", async () => {
 		const shutdown = s.fetch.calls.find((call) => call.url.endsWith("/api/shutdown"));
 		assert.equal(shutdown.init.method, "POST");
 		assert.equal(shutdown.init.headers["content-type"], "application/json");
-		assert.equal(shutdown.init.headers["x-vb"], "1");
+		assert.equal(shutdown.init.headers["x-desk"], "1");
 		assert.equal(shutdown.init.body, "{}");
 	} finally {
 		s.tmp.cleanup();
@@ -452,7 +452,7 @@ test("uninstall removes extension, skill, rule and Run value, and keeps data", a
 		assert.ok(lines.some((line) => line === `data kept: ${path.join(s.home, "data")}`));
 
 		assert.equal(s.reg.values.has(RUN_VALUE), false);
-		assert.equal(fs.existsSync(path.join(s.agent, "extensions", "visual-board.ts")), false);
+		assert.equal(fs.existsSync(path.join(s.agent, "extensions", "omo-desk.ts")), false);
 		assert.equal(fs.existsSync(path.join(s.userHome, ".agents", "skills", "visual-board")), false);
 		assert.equal(fs.existsSync(path.join(s.userHome, ".claude", "skills", "visual-board")), false);
 		assert.equal(fs.existsSync(path.join(s.userHome, ".claude", "rules", "visual-board.md")), false);
@@ -474,7 +474,7 @@ test("doctor passes after install and fails a missing extension copy", async () 
 		assert.equal(good.ok, true, good.lines.join("\n"));
 		assert.ok(good.lines.every((line) => line.includes(": ok")), good.lines.join("\n"));
 
-		fs.rmSync(path.join(s.agent, "extensions", "visual-board.ts"));
+		fs.rmSync(path.join(s.agent, "extensions", "omo-desk.ts"));
 		const bad = await doctor(s.opts);
 		assert.equal(bad.ok, false);
 		assert.ok(bad.lines.some((line) => line.startsWith("extension: fail")), bad.lines.join("\n"));

@@ -17,7 +17,7 @@
 	// Longest edge of an encoded crop. A big mark on a full-size screenshot must stay under the server's 5 MiB crop limit.
 	const CROP_MAX_PX = 1600;
 	const MIN_MARK_PX = 8;
-	const DEFAULT_HEADERS = { "content-type": "application/json", "x-vb": "1" };
+	const DEFAULT_HEADERS = { "content-type": "application/json", "x-desk": "1" };
 	const EVENT_LABELS = { submitted: "제출", feedback: "내 의견", reply: "세션 답", revised: "고친 안", closed: "끝남" };
 	const STATUS_LABELS = { mine: "내 차례", theirs: "세션 차례", closed: "끝남" };
 	const PROMPT_HEAD = [
@@ -394,7 +394,7 @@
 	async function renderMermaid(source) {
 		const mermaid = await ensureMermaid();
 		mmdCounter += 1;
-		const { svg } = await mermaid.render(`vb-mmd-${mmdCounter}`, source);
+		const { svg } = await mermaid.render(`desk-mmd-${mmdCounter}`, source);
 		el.stage.innerHTML = svg;
 		const root = el.stage.querySelector("svg");
 		if (!root) throw new Error("mermaid returned no svg");

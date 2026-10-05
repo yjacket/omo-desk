@@ -381,7 +381,7 @@
 			function postJson(path, body) {
 				return fetch(path, {
 					method: "POST",
-					headers: { "content-type": "application/json", "x-vb": "1" },
+					headers: { "content-type": "application/json", "x-desk": "1" },
 					body: JSON.stringify(body),
 				});
 			}

@@ -37,10 +37,10 @@ function fakeSpawn(plan) {
 	return { impl, calls };
 }
 
-test("an OMO_VISUAL_BOARD_ env key keeps the plain detached spawn with the server node args", async () => {
+test("an OMO_DESK_ env key keeps the plain detached spawn with the server node args", async () => {
 	const tmp = makeTmpHome();
 	try {
-		const env = { OMO_VISUAL_BOARD_HOME: tmp.home };
+		const env = { OMO_DESK_HOME: tmp.home };
 		const fake = fakeSpawn(() => ({ pid: 4321 }));
 		const result = await launchServer({ env, platform: "win32", spawnImpl: fake.impl });
 		assert.equal(result.via, "spawn");
@@ -60,7 +60,7 @@ test("an OMO_VISUAL_BOARD_ env key keeps the plain detached spawn with the serve
 	}
 });
 
-test("win32 without VB_/OMO_VISUAL_BOARD_ env creates the process through WMI", async () => {
+test("win32 without DESK_/OMO_DESK_ env creates the process through WMI", async () => {
 	const fake = fakeSpawn(() => ({ out: "0 1234\n", close: 0 }));
 	const env = {};
 	const result = await launchServer({ env, platform: "win32", spawnImpl: fake.impl });
@@ -69,12 +69,12 @@ test("win32 without VB_/OMO_VISUAL_BOARD_ env creates the process through WMI", 
 	const [call] = fake.calls;
 	assert.equal(call.cmd, "powershell.exe");
 	assert.deepEqual(call.args.slice(0, 3), ["-NoProfile", "-NonInteractive", "-Command"]);
-	assert.match(call.args[3], /VB_LAUNCH_CMD/);
+	assert.match(call.args[3], /DESK_LAUNCH_CMD/);
 	assert.match(call.args[3], /Win32_Process/);
-	assert.match(call.options.env.VB_LAUNCH_CMD, /--max-semi-space-size=1/);
-	assert.match(call.options.env.VB_LAUNCH_CMD, /--max-old-space-size=128/);
-	assert.match(call.options.env.VB_LAUNCH_CMD, /server\.mjs/);
-	assert.equal(call.options.env.VB_LAUNCH_CWD, homeDir(env));
+	assert.match(call.options.env.DESK_LAUNCH_CMD, /--max-semi-space-size=1/);
+	assert.match(call.options.env.DESK_LAUNCH_CMD, /--max-old-space-size=128/);
+	assert.match(call.options.env.DESK_LAUNCH_CMD, /server\.mjs/);
+	assert.equal(call.options.env.DESK_LAUNCH_CWD, homeDir(env));
 });
 
 test("a WMI failure falls back to the plain spawn and reports wmiError", async () => {
@@ -102,7 +102,7 @@ test("a child 'error' event stays caught and the spawn result still resolves", a
 test("a child 'error' event is appended to <home>/logs/launch.log", async () => {
 	const tmp = makeTmpHome();
 	try {
-		const env = { OMO_VISUAL_BOARD_HOME: tmp.home };
+		const env = { OMO_DESK_HOME: tmp.home };
 		const fake = fakeSpawn(() => ({ pid: 55, error: new Error("spawn boom") }));
 		const result = await launchServer({ env, platform: "linux", spawnImpl: fake.impl });
 		assert.equal(result.via, "spawn");
@@ -116,7 +116,7 @@ test("a child 'error' event is appended to <home>/logs/launch.log", async () => 
 
 test("a non-win32 platform uses the plain spawn without powershell", async () => {
 	const fake = fakeSpawn(() => ({ pid: 99 }));
-	const script = "/srv/vb/src/server.mjs";
+	const script = "/srv/desk/src/server.mjs";
 	const result = await launchServer({ env: {}, platform: "linux", script, spawnImpl: fake.impl });
 	assert.equal(result.via, "spawn");
 	assert.equal(fake.calls.length, 1);

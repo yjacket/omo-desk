@@ -12,7 +12,7 @@ A board shows the user pictures of a change (screenshots, diagrams) plus a few q
 - During ulw runs: when a screen, DB schema or flow changes. Put one up before plan-reviewer and one at the completion report.
 - Any time the user asks for a board or 그림.
 - Skip it when the user says "보드 생략".
-- At session start, a visual-board notice means the user left feedback. Handle that first.
+- At session start, an omo-desk notice means the user left feedback. Handle that first.
 
 ## Author
 
@@ -60,18 +60,18 @@ See `example/` for a working board.
 ## Submit
 
 ```sh
-node "$HOME/.omo-visual-board/app/bin/vb.mjs" submit .omo/boards/<slug>
+node "$HOME/.omo-desk/app/bin/desk.mjs" submit .omo/boards/<slug>
 ```
 
-In the rest of this skill, `vb` means `node "$HOME/.omo-visual-board/app/bin/vb.mjs"` (the messages the extension delivers already print the full command).
+In the rest of this skill, `desk` means `node "$HOME/.omo-desk/app/bin/desk.mjs"` (the messages the extension delivers already print the full command).
 
-It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as a bare URL on its own line, not in backticks or a code block: only a bare URL becomes a terminal hyperlink, which stays whole when a phone screen wraps it. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `vb revise <id> <dir>` instead, or `submit --new`.
+It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as a bare URL on its own line, not in backticks or a code block: only a bare URL becomes a terminal hyperlink, which stays whole when a phone screen wraps it. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `desk revise <id> <dir>` instead, or `submit --new`.
 
 ## After submitting
 
-- The extension delivers the user's feedback to you as a message. Read it in full with `vb show <id>`.
-- Answer a comment: `vb reply <id> <text>`.
+- The extension delivers the user's feedback to you as a message. Read it in full with `desk show <id>`.
+- Answer a comment: `desk reply <id> <text>`.
 - The user may answer every question in one comment, often dictated by voice. Match each answer to its question. When they ask for more explanation, revise the board with a fuller `say` (and `lead`) rather than only replying.
-- Change the board: edit the folder, then `vb revise <id> .omo/boards/<slug> --note "<what changed>"`.
-- Once the user chose 승인 and the work is done: `vb close <id> <summary>`. Copy the printed `record:` line into your report.
-- Not running under senpi? Start `vb wait <id>` in the background. It prints `FEEDBACK <id> <seq>` with the message when the user answers, or `CLOSED <id>`.
+- Change the board: edit the folder, then `desk revise <id> .omo/boards/<slug> --note "<what changed>"`.
+- Once the user chose 승인 and the work is done: `desk close <id> <summary>`. Copy the printed `record:` line into your report.
+- Not running under senpi? Start `desk wait <id>` in the background. It prints `FEEDBACK <id> <seq>` with the message when the user answers, or `CLOSED <id>`.

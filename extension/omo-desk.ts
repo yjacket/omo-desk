@@ -1,5 +1,5 @@
 /**
- * visual-board senpi extension (plan todo 11).
+ * omo-desk senpi extension (plan todo 11).
  *
  * Loaded into every interactive session from <agentDir>/extensions. It is inert
  * in omo-task child sessions, registers no tools and never does blocking I/O:
@@ -32,10 +32,10 @@ export function safeSegment(value) {
 	return String(value).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
 }
 
-export function createVisualBoard(pi, deps = {}) {
+export function createDesk(pi, deps = {}) {
 	const env = deps.env ?? process.env;
 	if (CHILD_ENV.some((key) => String(env[key] ?? "").length > 0)) return null;
-	const home = deps.home ?? env.OMO_VISUAL_BOARD_HOME ?? path.join(os.homedir(), ".omo-visual-board");
+	const home = deps.home ?? env.OMO_DESK_HOME ?? path.join(os.homedir(), ".omo-desk");
 	const now = deps.now ?? (() => Date.now());
 	const timer = deps.timer ?? { setInterval, clearInterval };
 	const doFetch = deps.fetch ?? ((...args) => globalThis.fetch(...args));
@@ -75,7 +75,7 @@ export function createVisualBoard(pi, deps = {}) {
 
 	async function baseUrl() {
 		if (baseUrlCache) return baseUrlCache;
-		if (env.VB_URL) return (baseUrlCache = String(env.VB_URL).replace(/\/+$/, ""));
+		if (env.DESK_URL) return (baseUrlCache = String(env.DESK_URL).replace(/\/+$/, ""));
 		let port = DEFAULT_PORT;
 		try {
 			const raw = await fsImpl.readFile(path.join(home, "config.json"), "utf8");
@@ -112,7 +112,7 @@ export function createVisualBoard(pi, deps = {}) {
 		if (now() - lastSpawnAt < SPAWN_COOLDOWN_MS) return;
 		lastSpawnAt = now();
 		const node = await resolveNode();
-		const child = spawnImpl(node, [path.join(home, "app", "bin", "vb.mjs"), "server", "start"], { detached: true, stdio: "ignore", windowsHide: true });
+		const child = spawnImpl(node, [path.join(home, "app", "bin", "desk.mjs"), "server", "start"], { detached: true, stdio: "ignore", windowsHide: true });
 		child?.on?.("error", (e) => void log("ensure: " + e.message));
 		child?.unref?.();
 	});
@@ -123,7 +123,7 @@ export function createVisualBoard(pi, deps = {}) {
 		if (value === lastFooter) return;
 		lastFooter = value;
 		try {
-			ctx.ui?.setStatus?.("visual-board", value);
+			ctx.ui?.setStatus?.("omo-desk", value);
 		} catch {
 			// the UI may already be gone during shutdown
 		}
@@ -136,7 +136,7 @@ export function createVisualBoard(pi, deps = {}) {
 		if (!keys.some((key) => !noticed.has(key))) return;
 		const text = typeof body?.notice === "string" ? body.notice : "";
 		if (text) {
-			pi?.sendMessage?.({ customType: "visual-board", content: text, display: true, details: { pending: keys } }, { deliverAs: "nextTurn", triggerTurn: false });
+			pi?.sendMessage?.({ customType: "omo-desk", content: text, display: true, details: { pending: keys } }, { deliverAs: "nextTurn", triggerTurn: false });
 		}
 		for (const key of keys) noticed.add(key);
 	});
@@ -215,7 +215,7 @@ export function createVisualBoard(pi, deps = {}) {
 			}
 			if (theirs) {
 				pi?.sendMessage?.(
-					{ customType: "visual-board", content: payload.text, display: true, details: { proposalId: payload.proposalId, seq: payload.seq } },
+					{ customType: "omo-desk", content: payload.text, display: true, details: { proposalId: payload.proposalId, seq: payload.seq } },
 					{ deliverAs: "followUp", triggerTurn: true },
 				);
 				delivered.add(key);
@@ -280,7 +280,7 @@ export function createVisualBoard(pi, deps = {}) {
 		try {
 			await doFetch(`${await baseUrl()}/api/bye`, {
 				method: "POST",
-				headers: { "content-type": "application/json", "x-vb": "1" },
+				headers: { "content-type": "application/json", "x-desk": "1" },
 				body: JSON.stringify({ session: sessionId }),
 				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 			});
@@ -299,6 +299,6 @@ export function createVisualBoard(pi, deps = {}) {
 	return { inbox, status, notice, stop };
 }
 
-export default function visualBoardExtension(pi, deps = {}) {
-	return createVisualBoard(pi, deps);
+export default function omoDeskExtension(pi, deps = {}) {
+	return createDesk(pi, deps);
 }

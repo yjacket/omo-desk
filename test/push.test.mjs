@@ -33,7 +33,7 @@ function subscriptionFor(endpoint) {
 }
 
 function withPusher(t, { fetch, log = () => {} } = {}) {
-	const tmp = makeTmpHome("vb-push-");
+	const tmp = makeTmpHome("desk-push-");
 	t.after(() => tmp.cleanup());
 	const dir = path.join(tmp.home, "push");
 	return { dir, pusher: createPusher({ dir, fetch, now: () => NOW, log }) };
@@ -73,7 +73,7 @@ test("vapidHeader carries a verifiable ES256 JWT with the endpoint origin", () =
 	assert.deepEqual(JSON.parse(unb64u(claims).toString()), {
 		aud: "https://fcm.example.test",
 		exp: Math.floor(NOW / 1000) + 12 * 60 * 60,
-		sub: "mailto:omo-visual-board@example.invalid",
+		sub: "mailto:omo-desk@example.invalid",
 	});
 	const point = unb64u(k);
 	assert.equal(point.length, 65);
@@ -87,7 +87,7 @@ test("vapidHeader carries a verifiable ES256 JWT with the endpoint origin", () =
 });
 
 test("vapid.json is created once and reused", (t) => {
-	const tmp = makeTmpHome("vb-vapid-");
+	const tmp = makeTmpHome("desk-vapid-");
 	t.after(() => tmp.cleanup());
 	const dir = path.join(tmp.home, "push");
 	const file = path.join(dir, "vapid.json");
@@ -144,7 +144,7 @@ test("notify keeps 201 and 202, removes 404 and 410, keeps and logs 500 and reje
 	const { pusher } = withPusher(t, { fetch, log: (line) => logs.push(line) });
 	for (const endpoint of statuses.keys()) pusher.subscribe(subscriptionFor(endpoint), {});
 
-	const results = await pusher.notify({ title: "t", body: "b", url: "/p/260101-abcd", tag: "vb-260101-abcd" });
+	const results = await pusher.notify({ title: "t", body: "b", url: "/p/260101-abcd", tag: "desk-260101-abcd" });
 	assert.equal(results.length, statuses.size);
 	const byEndpoint = new Map(results.map((result) => [result.endpoint, result]));
 	assert.equal(byEndpoint.get("https://push.example/created").delivered, true);

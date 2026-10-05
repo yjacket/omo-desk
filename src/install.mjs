@@ -9,7 +9,7 @@ import { agentDir, layout, readConfig } from "./paths.mjs";
 import { SERVE_PROXY, guard, parseServe, serveOff, serveOn, status } from "./tailscale.mjs";
 
 export const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-export const RUN_VALUE = "omo-visual-board";
+export const RUN_VALUE = "omo-desk";
 export const RELOAD_HINT = "열린 omo 세션에서 /reload 하면 확장이 반영됩니다.";
 
 const APP_ENTRIES = ["bin", "src", "web", "extension", "skill", "rules", "package.json"];
@@ -224,7 +224,7 @@ export async function install(opts = {}) {
 		try {
 			await fetchImpl(`http://127.0.0.1:${port}/api/shutdown`, {
 				method: "POST",
-				headers: { "content-type": "application/json", "x-vb": "1" },
+				headers: { "content-type": "application/json", "x-desk": "1" },
 				body: "{}",
 			});
 		} catch {
@@ -266,8 +266,8 @@ export async function install(opts = {}) {
 	}
 
 	// 4. extension
-	const extSrc = path.join(l.app, "extension", "visual-board.ts");
-	const extDst = path.join(agentDir(env), "extensions", "visual-board.ts");
+	const extSrc = path.join(l.app, "extension", "omo-desk.ts");
+	const extDst = path.join(agentDir(env), "extensions", "omo-desk.ts");
 	if (!fs.existsSync(extSrc)) lines.push("extension: skipped");
 	else if (filesEqual(extSrc, extDst)) lines.push("extension: unchanged");
 	else {
@@ -353,7 +353,7 @@ export async function uninstall(opts = {}) {
 		try {
 			await fetchImpl(`http://127.0.0.1:${cfg.port}/api/shutdown`, {
 				method: "POST",
-				headers: { "content-type": "application/json", "x-vb": "1" },
+				headers: { "content-type": "application/json", "x-desk": "1" },
 				body: "{}",
 			});
 		} catch {
@@ -372,7 +372,7 @@ export async function uninstall(opts = {}) {
 		lines.push("autostart: absent");
 	}
 
-	lines.push(`extension: ${removePath(path.join(agentDir(env), "extensions", "visual-board.ts"))}`);
+	lines.push(`extension: ${removePath(path.join(agentDir(env), "extensions", "omo-desk.ts"))}`);
 	const skillDirs = [
 		path.join(userHome, ".agents", "skills", "visual-board"),
 		path.join(userHome, ".claude", "skills", "visual-board"),
@@ -417,7 +417,7 @@ export async function doctor(opts = {}) {
 	record("launcher", readText(l.launcher) === launcherContent({ nodeExe: execPath, serverPath: path.join(l.app, "src", "server.mjs") }), "content differs");
 	record(
 		"extension",
-		filesEqual(path.join(l.app, "extension", "visual-board.ts"), path.join(agentDir(env), "extensions", "visual-board.ts")),
+		filesEqual(path.join(l.app, "extension", "omo-desk.ts"), path.join(agentDir(env), "extensions", "omo-desk.ts")),
 		"differs from the app copy",
 	);
 	record(

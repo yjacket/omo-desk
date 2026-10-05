@@ -11,7 +11,7 @@ import { createServer } from "../src/server.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = path.join(REPO, "web");
-const BIN = path.join(REPO, "bin", "vb.mjs");
+const BIN = path.join(REPO, "bin", "desk.mjs");
 const toSlash = (value) => value.replace(/\\/g, "/");
 const CLI_HINT = `node "${toSlash(BIN)}"`;
 const REPO_VERSION = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).version;
@@ -48,7 +48,7 @@ function makeGitRepo(home) {
 }
 
 async function setup(t) {
-	const tmp = makeTmpHome("vb-cli-");
+	const tmp = makeTmpHome("desk-cli-");
 	const server = createServer({
 		home: tmp.home,
 		webDir: WEB,
@@ -67,14 +67,14 @@ async function setup(t) {
 function childEnv(home, base, extra = {}) {
 	const env = {
 		...process.env,
-		VB_NO_ENSURE: "1",
+		DESK_NO_ENSURE: "1",
 		PI_SESSION_ID: "test-sess",
-		VB_WAIT_POLL_MS: "20",
-		VB_ENSURE_POLL_MS: "20",
-		OMO_VISUAL_BOARD_HOME: home,
+		DESK_WAIT_POLL_MS: "20",
+		DESK_ENSURE_POLL_MS: "20",
+		OMO_DESK_HOME: home,
 	};
-	if (base) env.VB_URL = base;
-	else delete env.VB_URL;
+	if (base) env.DESK_URL = base;
+	else delete env.DESK_URL;
 	Object.assign(env, extra);
 	for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
 	return env;
@@ -104,7 +104,7 @@ async function runCli(ctx, args, options) {
 function postJson(base, route, body) {
 	return fetch(base + route, {
 		method: "POST",
-		headers: { "content-type": "application/json", "x-vb": "1" },
+		headers: { "content-type": "application/json", "x-desk": "1" },
 		body: JSON.stringify(body),
 	});
 }
@@ -265,7 +265,7 @@ test("wait prints WAITING and then the feedback message", { timeout: 30000 }, as
 	const result = await done;
 	assert.equal(result.code, 0, result.stderr + stdout);
 	assert.ok(stdout.includes(`FEEDBACK ${id} ${seq}`), stdout);
-	assert.ok(stdout.includes("[visual-board] 의견이 왔습니다"), stdout);
+	assert.ok(stdout.includes("[omo-desk] 의견이 왔습니다"), stdout);
 	assert.ok(stdout.includes(`${CLI_HINT} show ${id}`), stdout);
 });
 
@@ -279,7 +279,7 @@ test("wait times out on a proposal that stays mine", { timeout: 30000 }, async (
 });
 
 test("ensure against a foreign process on the configured port exits 3", async (t) => {
-	const tmp = makeTmpHome("vb-cli-stub-");
+	const tmp = makeTmpHome("desk-cli-stub-");
 	const stub = http.createServer((req, res) => {
 		res.writeHead(200, { "content-type": "application/json" });
 		res.end(JSON.stringify({ ok: true, name: "other" }));
@@ -299,15 +299,15 @@ test("ensure against a foreign process on the configured port exits 3", async (t
 	assert.equal(result.code, 3, result.stdout + result.stderr);
 });
 
-// A stand-in for <home>/app/src/server.mjs: it reports VB_FAKE_VERSION, records a
+// A stand-in for <home>/app/src/server.mjs: it reports DESK_FAKE_VERSION, records a
 // /api/shutdown hit, and marks the first non-health request it serves. While the old
 // server still holds the port it waits for the test's "old-closed" marker, not a timer.
 const FAKE_APP_SOURCE = [
 	'import fs from "node:fs";',
 	'import http from "node:http";',
 	'import path from "node:path";',
-	"const home = process.env.OMO_VISUAL_BOARD_HOME;",
-	'const version = process.env.VB_FAKE_VERSION || "0.0.0";',
+	"const home = process.env.OMO_DESK_HOME;",
+	'const version = process.env.DESK_FAKE_VERSION || "0.0.0";',
 	'const countFile = path.join(home, "fake-shutdowns");',
 	'const servedFile = path.join(home, "fake-served");',
 	'const config = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));',
@@ -321,7 +321,7 @@ const FAKE_APP_SOURCE = [
 	"\t\treturn;",
 	"\t}",
 	'\tif (req.url === "/api/health") {',
-	'\t\tres.end(JSON.stringify({ ok: true, name: "omo-visual-board", version }));',
+	'\t\tres.end(JSON.stringify({ ok: true, name: "omo-desk", version }));',
 	"\t\treturn;",
 	"\t}",
 	"\tfs.writeFileSync(servedFile, req.url);",
@@ -353,7 +353,7 @@ function waitForExit(pid) {
 }
 
 async function ensureCtx(t, appVersion = null) {
-	const tmp = makeTmpHome("vb-cli-ensure-");
+	const tmp = makeTmpHome("desk-cli-ensure-");
 	let shuttingDown = false;
 	let oldClosing = false;
 	const old = http.createServer((req, res) => {
@@ -368,7 +368,7 @@ async function ensureCtx(t, appVersion = null) {
 			// A real server keeps answering for a moment after /api/shutdown. Answer one more
 			// health check after it, then close: that is the window ensure must not mistake for success.
 			const closeAfter = shuttingDown;
-			res.end(JSON.stringify({ ok: true, name: "omo-visual-board", version: "0.0.0-installed" }), () => {
+			res.end(JSON.stringify({ ok: true, name: "omo-desk", version: "0.0.0-installed" }), () => {
 				if (!closeAfter || oldClosing) return;
 				oldClosing = true;
 				old.close(() => fs.writeFileSync(path.join(tmp.home, "old-closed"), ""));
@@ -391,7 +391,7 @@ async function ensureCtx(t, appVersion = null) {
 	if (appVersion !== null) {
 		fs.writeFileSync(
 			path.join(tmp.home, "app", "package.json"),
-			JSON.stringify({ name: "omo-visual-board", version: appVersion }),
+			JSON.stringify({ name: "omo-desk", version: appVersion }),
 		);
 	}
 	const repo = makeGitRepo(tmp.home);
@@ -420,7 +420,7 @@ async function ensureCtx(t, appVersion = null) {
 
 test("ensure shuts down a stale server when the installed app matches the cli", { timeout: 30000 }, async (t) => {
 	const ctx = await ensureCtx(t, REPO_VERSION);
-	const result = await runCli(ctx, ["list"], { env: { VB_NO_ENSURE: undefined, VB_FAKE_VERSION: REPO_VERSION } });
+	const result = await runCli(ctx, ["list"], { env: { DESK_NO_ENSURE: undefined, DESK_FAKE_VERSION: REPO_VERSION } });
 	assert.equal(result.code, 0, result.stdout + result.stderr);
 	assert.ok(!result.stderr.includes("differs"), result.stderr);
 	assert.ok(
@@ -437,7 +437,7 @@ test("ensure shuts down a stale server when the installed app matches the cli", 
 test("ensure warns once and does not shut down a server whose version still differs", { timeout: 30000 }, async (t) => {
 	const other = "0.0.0-installed";
 	const ctx = await ensureCtx(t, other);
-	const result = await runCli(ctx, ["list"], { env: { VB_NO_ENSURE: undefined, VB_FAKE_VERSION: other } });
+	const result = await runCli(ctx, ["list"], { env: { DESK_NO_ENSURE: undefined, DESK_FAKE_VERSION: other } });
 	assert.equal(result.code, 0, result.stdout + result.stderr);
 	assert.ok(result.stderr.includes(`server version ${other} differs from cli ${REPO_VERSION}`), result.stderr);
 	assert.equal((result.stderr.match(/differs from cli/g) || []).length, 1, result.stderr);

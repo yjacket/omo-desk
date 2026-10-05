@@ -13,7 +13,7 @@ const answerLine = (board, answers) => {
 
 export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 	const lines = [
-		`[visual-board] 의견이 왔습니다: ${summary.title} (${summary.id}, ${event.rev}안, #${event.seq})`,
+		`[omo-desk] 의견이 왔습니다: ${summary.title} (${summary.id}, ${event.rev}안, #${event.seq})`,
 		`판단: ${event.verdict === "approve" ? "승인" : "재요청"}`,
 	];
 	const answers = answerLine(board, event.answers);
@@ -35,7 +35,7 @@ export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 
 export function pendingNotice(items, cli) {
 	if (!items || items.length === 0) return null;
-	const lines = [`[visual-board] 이 워크트리에 답을 기다리는 기획안이 ${items.length}건 있습니다.`];
+	const lines = [`[omo-desk] 이 워크트리에 답을 기다리는 기획안이 ${items.length}건 있습니다.`];
 	for (const item of items) {
 		lines.push(`- ${item.title} (${item.id}) ${item.url} -> ${cli} show ${item.id}`);
 	}

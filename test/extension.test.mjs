@@ -1,11 +1,11 @@
-// Fake-pi harness for the visual-board extension: no senpi, no server, no wall clock.
+// Fake-pi harness for the omo-desk extension: no senpi, no server, no wall clock.
 // Run: node --test test/extension.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fsp from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createVisualBoard, safeSegment } from "../extension/visual-board.ts";
+import { createDesk, safeSegment } from "../extension/omo-desk.ts";
 import { safeSegment as pathsSafeSegment } from "../src/paths.mjs";
 import { makeTmpHome } from "./helpers/tmp-home.mjs";
 
@@ -18,7 +18,7 @@ const PAYLOAD = {
 	title: "결제 화면",
 	url: "http://127.0.0.1:4377/p/261004-abcd",
 	approved: false,
-	text: "[visual-board] 의견이 왔습니다: 결제 화면 (261004-abcd, 1안, #3)",
+	text: "[omo-desk] 의견이 왔습니다: 결제 화면 (261004-abcd, 1안, #3)",
 };
 
 function fakePi() {
@@ -81,8 +81,8 @@ function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, 
 		}
 		return { ok: true, status: 200, json: async () => ({ ok: true }) };
 	};
-	const handle = createVisualBoard(fp.pi, {
-		env: { OMO_VISUAL_BOARD_HOME: tmp.home, ...env },
+	const handle = createDesk(fp.pi, {
+		env: { OMO_DESK_HOME: tmp.home, ...env },
 		home: tmp.home,
 		now: () => clock,
 		timer: {
@@ -142,13 +142,13 @@ test("omo-task child sessions are inert: null, no handlers", () => {
 	for (const key of ["OMO_SENPI_TASK_RPC_CHILD", "SENPI_TASK_MEMBER", "SENPI_TASK_MEMBER_TASK_ID"]) {
 		const tmp = makeTmpHome();
 		const fp = fakePi();
-		const handle = createVisualBoard(fp.pi, { env: { [key]: "1" }, home: tmp.home });
+		const handle = createDesk(fp.pi, { env: { [key]: "1" }, home: tmp.home });
 		assert.equal(handle, null, key);
 		assert.equal(fp.handlers.size, 0, key);
 		tmp.cleanup();
 	}
 	const tmp = makeTmpHome();
-	const empty = createVisualBoard(fakePi().pi, { env: { OMO_SENPI_TASK_RPC_CHILD: "" }, home: tmp.home });
+	const empty = createDesk(fakePi().pi, { env: { OMO_SENPI_TASK_RPC_CHILD: "" }, home: tmp.home });
 	assert.notEqual(empty, null, "an empty value is not a child session");
 	empty.stop();
 	tmp.cleanup();
@@ -164,7 +164,7 @@ test("session_start registers the 3 s/30 s timers and asks /api/here with start=
 	);
 	assert.equal(s.fetchCalls.length, 1);
 	assert.match(s.fetchCalls[0].url, /\/api\/here\?cwd=C%3A%2Fwork%2Fproj&session=s-1&start=1$/);
-	assert.deepEqual(s.statuses.at(-1), ["visual-board", "보드 내 차례 1 · 세션 차례 0"]);
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "보드 내 차례 1 · 세션 차례 0"]);
 	await s.tick(30000);
 	assert.equal(s.fetchCalls.length, 2);
 	assert.doesNotMatch(s.fetchCalls[1].url, /start=1/, "later ticks are not a session start");
@@ -177,7 +177,7 @@ test("a payload whose proposal is theirs is delivered once as a followUp and the
 	s.writeInbox();
 	await s.tick(3000);
 	assert.equal(s.pi.sent.length, 1);
-	assert.equal(s.pi.sent[0].message.customType, "visual-board");
+	assert.equal(s.pi.sent[0].message.customType, "omo-desk");
 	assert.equal(s.pi.sent[0].message.content, PAYLOAD.text);
 	assert.deepEqual(s.pi.sent[0].message.details, { proposalId: PAYLOAD.proposalId, seq: PAYLOAD.seq });
 	assert.deepEqual(s.pi.sent[0].opts, { deliverAs: "followUp", triggerTurn: true });
@@ -328,11 +328,11 @@ test("an unparsable inbox file is deleted and logged", async () => {
 test("an unreachable server shows 보드 서버 꺼짐 and starts the CLI at most once per 120 s", async () => {
 	const s = setup({ fetchThrows: true });
 	await s.pi.emit("session_start", s.ctx);
-	assert.deepEqual(s.statuses.at(-1), ["visual-board", "보드 서버 꺼짐"]);
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "보드 서버 꺼짐"]);
 	assert.equal(s.spawned.length, 1);
 	const [spawned] = s.spawned;
 	assert.match(path.basename(spawned.cmd), /^node(\.exe)?$/i);
-	assert.match(spawned.args[0], /app[\\/]bin[\\/]vb\.mjs$/);
+	assert.match(spawned.args[0], /app[\\/]bin[\\/]desk\.mjs$/);
 	assert.deepEqual(spawned.args.slice(1), ["server", "start"]);
 	assert.deepEqual(spawned.opts, { detached: true, stdio: "ignore", windowsHide: true });
 	await s.tick(30000);
@@ -351,7 +351,7 @@ test("session_shutdown stops the timers and POSTs /api/bye with the session id",
 	const bye = s.fetchCalls.find((call) => call.url.endsWith("/api/bye"));
 	assert.ok(bye, "the server is told the session is gone");
 	assert.equal(bye.opts.method, "POST");
-	assert.equal(bye.opts.headers["x-vb"], "1");
+	assert.equal(bye.opts.headers["x-desk"], "1");
 	assert.match(bye.opts.headers["content-type"], /application\/json/);
 	assert.deepEqual(JSON.parse(bye.opts.body), { session: SESSION });
 	const failing = setup({ fetchThrows: true });
@@ -367,7 +367,7 @@ test("status announces new notice keys once, sets the footer, and clears it when
 	});
 	await s.pi.emit("session_start", s.ctx);
 	assert.equal(s.pi.sent.length, 1);
-	assert.equal(s.pi.sent[0].message.customType, "visual-board");
+	assert.equal(s.pi.sent[0].message.customType, "omo-desk");
 	assert.equal(s.pi.sent[0].message.content, "notice-1");
 	assert.deepEqual(s.pi.sent[0].message.details, { pending: ["261004-abcd:3"] });
 	assert.deepEqual(s.pi.sent[0].opts, { deliverAs: "nextTurn", triggerTurn: false });
@@ -375,7 +375,7 @@ test("status announces new notice keys once, sets the footer, and clears it when
 	assert.equal(s.pi.sent.length, 1, "the same key is not announced twice");
 	s.state.here = { footer: "", notice: "notice-1", noticeKeys: ["261004-abcd:3"] };
 	await s.tick(30000);
-	assert.deepEqual(s.statuses.at(-1), ["visual-board", undefined], "an empty footer clears the status");
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", undefined], "an empty footer clears the status");
 	const sets = s.statuses.length;
 	await s.tick(30000);
 	assert.equal(s.statuses.length, sets, "an unchanged footer is not re-set");
@@ -392,7 +392,7 @@ test("session_start without ctx.cwd falls back to pi.cwd for /api/here", async (
 	await s.pi.emit("session_start", s.ctx);
 	assert.equal(s.fetchCalls.length, 1);
 	assert.match(s.fetchCalls[0].url, /\/api\/here\?cwd=C%3A%2Fwork%2Ffrom-pi&session=s-1&start=1$/);
-	assert.deepEqual(s.statuses.at(-1), ["visual-board", "보드 내 차례 1 · 세션 차례 0"]);
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "보드 내 차례 1 · 세션 차례 0"]);
 	s.cleanup();
 });
 

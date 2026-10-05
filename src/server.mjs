@@ -17,7 +17,7 @@ const IDENTITY_TTL_MS = 60_000;
 const LIVE_WINDOW_MS = 90_000;
 const PROBE_TIMEOUT_MS = 3000;
 const ASIDE_FALLBACK = "C:\\Program Files\\Aside\\Application\\Aside.exe";
-const NAME = "omo-visual-board";
+const NAME = "omo-desk";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..");
@@ -38,7 +38,7 @@ const TYPES = {
 const INVALID_SEGMENT = /^(?:|\.|\.\.)$/;
 const ENDPOINT_LIMIT = 2048;
 const REPLY_BODY_LIMIT = 120;
-const WELCOME = { title: "알림이 켜졌습니다", body: "새 기획안과 답이 오면 알려 드립니다", url: "/", tag: "vb-welcome" };
+const WELCOME = { title: "알림이 켜졌습니다", body: "새 기획안과 답이 오면 알려 드립니다", url: "/", tag: "desk-welcome" };
 
 function validSubscription(value) {
 	if (!value || typeof value !== "object" || !value.keys || typeof value.keys !== "object") return false;
@@ -122,7 +122,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 		logs: path.join(home, "logs"),
 		push: path.join(home, "push"),
 	};
-	const cli = `node "${toSlash(path.join(home, "app", "bin", "vb.mjs"))}"`;
+	const cli = `node "${toSlash(path.join(home, "app", "bin", "desk.mjs"))}"`;
 	const store = createStore({ dataDir: dir.data, inboxDir: dir.inbox, now });
 	const push = pusher ?? createPusher({ dir: dir.push, log: (line) => appendLog(dir.logs, line) });
 	const targets = readTargets(webDir);
@@ -239,7 +239,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 	}
 
 	function proposalMessage(title, body, id) {
-		return { title, body, url: `/p/${id}`, tag: `vb-${id}` };
+		return { title, body, url: `/p/${id}`, tag: `desk-${id}` };
 	}
 
 	const where = (summary) => `${summary.product.name || summary.product.key} \u00b7 ${summary.feature.branch}`;

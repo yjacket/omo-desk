@@ -47,7 +47,7 @@ function makeBoard(home, name = "proto") {
 }
 
 async function withServer(t, options = {}) {
-	const tmp = makeTmpHome("vb-srv-");
+	const tmp = makeTmpHome("desk-srv-");
 	const server = createServer({
 		home: tmp.home,
 		webDir: options.webDir || WEB,
@@ -68,7 +68,7 @@ async function withServer(t, options = {}) {
 function postJson(base, p, body, headers = {}) {
 	return fetch(base + p, {
 		method: "POST",
-		headers: { "content-type": "application/json", "x-vb": "1", ...headers },
+		headers: { "content-type": "application/json", "x-desk": "1", ...headers },
 		body: JSON.stringify(body),
 	});
 }
@@ -134,7 +134,7 @@ test("health reports the service with no-store", async (t) => {
 	assert.equal(res.headers.get("cache-control"), "no-store");
 	const body = await res.json();
 	assert.equal(body.ok, true);
-	assert.equal(body.name, "omo-visual-board");
+	assert.equal(body.name, "omo-desk");
 	assert.equal(body.port, ctx.port);
 	assert.equal(typeof body.version, "string");
 	assert.ok(body.pid > 0);
@@ -174,7 +174,7 @@ test("feedback routes to the owner, writes the inbox, stores client and ua", asy
 		ctx.base,
 		`/api/p/${id}/feedback`,
 		{ rev: 1, verdict: "change", comment: "고쳐 주세요" },
-		{ "user-agent": "vb-test/1.0" },
+		{ "user-agent": "desk-test/1.0" },
 	);
 	assert.equal(res.status, 200);
 	const fb = await res.json();
@@ -188,13 +188,13 @@ test("feedback routes to the owner, writes the inbox, stores client and ua", asy
 	assert.ok(fs.existsSync(inbox), "inbox file exists");
 	const payload = JSON.parse(fs.readFileSync(inbox, "utf8"));
 	assert.equal(payload.proposalId, id);
-	assert.match(payload.text, /\[visual-board\] 의견이 왔습니다/);
-	assert.ok(payload.text.includes(`node "` + toSlash(path.join(ctx.home, "app", "bin", "vb.mjs")) + `" show ${id}`));
+	assert.match(payload.text, /\[omo-desk\] 의견이 왔습니다/);
+	assert.ok(payload.text.includes(`node "` + toSlash(path.join(ctx.home, "app", "bin", "desk.mjs")) + `" show ${id}`));
 
 	const detail = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
 	const event = detail.events.find((item) => item.type === "feedback");
 	assert.equal(event.client, "127.0.0.1");
-	assert.equal(event.ua, "vb-test/1.0");
+	assert.equal(event.ua, "desk-test/1.0");
 	assert.equal(event.delivery, "pending");
 });
 
@@ -298,7 +298,7 @@ test("the tailscale funnel header is rejected everywhere", async (t) => {
 	assert.equal(res.status, 403);
 });
 
-test("POST without the x-vb guard is forbidden", async (t) => {
+test("POST without the x-desk guard is forbidden", async (t) => {
 	const ctx = await withServer(t);
 	const dir = makeBoard(ctx.home);
 	const res = await fetch(`${ctx.base}/api/proposals`, {
@@ -443,14 +443,14 @@ test("a body over 30 MiB is too long", async (t) => {
 	const big = `"${"x".repeat(30 * 1024 * 1024 + 1)}"`;
 	const res = await fetch(`${ctx.base}/api/proposals`, {
 		method: "POST",
-		headers: { "content-type": "application/json", "x-vb": "1" },
+		headers: { "content-type": "application/json", "x-desk": "1" },
 		body: big,
 	});
 	assert.equal(res.status, 413);
 });
 
 test("static pages come from webDir", async (t) => {
-	const tmp = makeTmpHome("vb-web-");
+	const tmp = makeTmpHome("desk-web-");
 	t.after(() => tmp.cleanup());
 	const dir = path.join(tmp.home, "web");
 	fs.mkdirSync(dir, { recursive: true });
@@ -732,7 +732,7 @@ test("subscribe stores the subscription and sends the welcome push to it only", 
 		title: "알림이 켜졌습니다",
 		body: "새 기획안과 답이 오면 알려 드립니다",
 		url: "/",
-		tag: "vb-welcome",
+		tag: "desk-welcome",
 	});
 	assert.equal(pusher.subscribed.length, 1);
 	assert.deepEqual(pusher.subscribed[0].subscription, subscription);
@@ -789,7 +789,7 @@ test("a new proposal notifies once; an identical resubmit does not", async (t) =
 	assert.equal(message.title, "새 기획안 · 로그인 개편");
 	assert.equal(message.body, `${sub.summary.product.name || sub.summary.product.key} · ${sub.summary.feature.branch}`);
 	assert.equal(message.url, `/p/${id}`);
-	assert.equal(message.tag, `vb-${id}`);
+	assert.equal(message.tag, `desk-${id}`);
 	assert.equal(pusher.calls.length, 1);
 
 	const again = await submit(ctx, { srcDir: dir, title: "로그인 개편" });
@@ -815,7 +815,7 @@ test("revise notifies with the note, or product and branch without one", async (
 	assert.equal(noteMessage.title, "수정본 2 · 개편");
 	assert.equal(noteMessage.body, "색을 바꿨습니다");
 	assert.equal(noteMessage.url, `/p/${id}`);
-	assert.equal(noteMessage.tag, `vb-${id}`);
+	assert.equal(noteMessage.tag, `desk-${id}`);
 
 	const plain = pusher.nextNotify();
 	const parsed = board();
@@ -840,7 +840,7 @@ test("a session reply notifies with the text cut to 120 chars", async (t) => {
 	assert.equal(message.title, "답이 왔습니다 · 답장");
 	assert.equal(message.body, "가".repeat(120));
 	assert.equal(message.url, `/p/${id}`);
-	assert.equal(message.tag, `vb-${id}`);
+	assert.equal(message.tag, `desk-${id}`);
 });
 
 test("owner feedback and closes do not notify", async (t) => {

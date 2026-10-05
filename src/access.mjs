@@ -34,6 +34,6 @@ export function postGuard(headers) {
 	return (
 		typeof contentType === "string" &&
 		contentType.startsWith("application/json") &&
-		header(headers, "x-vb") === "1"
+		header(headers, "x-desk") === "1"
 	);
 }

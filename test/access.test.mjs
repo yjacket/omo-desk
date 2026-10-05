@@ -123,12 +123,12 @@ test("ALLOW maps roles to the contract's classes", () => {
 	});
 });
 
-test("postGuard requires json content-type and x-vb", () => {
+test("postGuard requires json content-type and x-desk", () => {
 	assert.equal(postGuard({}), false);
-	assert.equal(postGuard({ "content-type": "text/plain", "x-vb": "1" }), false);
-	assert.equal(postGuard({ "content-type": "application/json", "x-vb": "0" }), false);
+	assert.equal(postGuard({ "content-type": "text/plain", "x-desk": "1" }), false);
+	assert.equal(postGuard({ "content-type": "application/json", "x-desk": "0" }), false);
 	assert.equal(
-		postGuard({ "content-type": "application/json; charset=utf-8", "x-vb": "1" }),
+		postGuard({ "content-type": "application/json; charset=utf-8", "x-desk": "1" }),
 		true,
 	);
 });

@@ -5,11 +5,11 @@ import { layout } from "./paths.mjs";
 import { feedbackMessage } from "./message.mjs";
 import * as client from "./client.mjs";
 
-const NAME = "omo-visual-board";
+const NAME = "omo-desk";
 const DEFAULT_WAIT_SEC = 600;
 const HEALTH_TIMEOUT_MS = 1500;
 
-const CLI = `node "${String(process.argv[1] ?? "vb.mjs").replace(/\\/g, "/")}"`;
+const CLI = `node "${String(process.argv[1] ?? "desk.mjs").replace(/\\/g, "/")}"`;
 
 const USAGE = [
 	`usage: ${CLI} <command> [--json]`,
@@ -51,7 +51,7 @@ function parse(rest) {
 }
 
 function sessionOf(env) {
-	return { id: env.VB_SESSION || env.PI_SESSION_ID || null, file: env.PI_SESSION_FILE || null };
+	return { id: env.DESK_SESSION || env.PI_SESSION_ID || null, file: env.PI_SESSION_FILE || null };
 }
 
 async function call(method, route, body, env) {
@@ -300,7 +300,7 @@ async function cmdPending(rest, json) {
 	const env = process.env;
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
-	const session = process.env.VB_SESSION || process.env.PI_SESSION_ID || null;
+	const session = process.env.DESK_SESSION || process.env.PI_SESSION_ID || null;
 	const query = new URLSearchParams({ cwd: process.cwd() });
 	if (session) query.set("session", session);
 	const res = await call("GET", `/api/here?${query}`, null, env);
@@ -334,7 +334,7 @@ async function cmdWait(rest, json) {
 	}
 	const env = process.env;
 	const timeoutMs = Math.max(0, Number(flags.get("timeout") ?? DEFAULT_WAIT_SEC)) * 1000 || DEFAULT_WAIT_SEC * 1000;
-	const pollMs = Number(env.VB_WAIT_POLL_MS) || 2000;
+	const pollMs = Number(env.DESK_WAIT_POLL_MS) || 2000;
 	const started = Date.now();
 	out(`WAITING ${id}`);
 	for (;;) {
@@ -409,7 +409,7 @@ async function cmdServer(rest, json) {
 	if (action === "start" || action === "restart") {
 		if (action === "restart") await call("POST", "/api/shutdown", {}, env);
 		const launchEnv = { ...env };
-		delete launchEnv.VB_NO_ENSURE;
+		delete launchEnv.DESK_NO_ENSURE;
 		const ok = await client.ensure(launchEnv);
 		const live = await health(env);
 		if (!ok || !live) {

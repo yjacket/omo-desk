@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { feedbackMessage, footerText, pendingNotice } from "../src/message.mjs";
 
-const CLI = 'node "C:/x/app/bin/vb.mjs"';
+const CLI = 'node "C:/x/app/bin/desk.mjs"';
 const URL = "https://box.tail.ts.net:4378/p/240101-abcd";
 const CROPS = "C:/home/data/proposals/240101-abcd";
 
@@ -42,7 +42,7 @@ test("approve verdict renders header, 판단, 보기 and 처리 with the current
 	assert.equal(
 		text,
 		[
-			"[visual-board] 의견이 왔습니다: 로그인 개편 (240101-abcd, 3안, #4)",
+			"[omo-desk] 의견이 왔습니다: 로그인 개편 (240101-abcd, 3안, #4)",
 			"판단: 승인",
 			`보기: ${URL}`,
 			`처리: ${CLI} show 240101-abcd 로 전체를 읽고 ${CLI} reply / revise / close 로 답하세요.`,
@@ -72,7 +72,7 @@ test("change verdict maps answers to question text and option labels, marks carr
 	assert.equal(
 		text,
 		[
-			"[visual-board] 의견이 왔습니다: 로그인 개편 (240101-abcd, 2안, #9)",
+			"[omo-desk] 의견이 왔습니다: 로그인 개편 (240101-abcd, 2안, #9)",
 			"판단: 재요청",
 			"답: 레이아웃은? -> 상단 메뉴; 테마는? -> 다크",
 			"전체 의견: 상단 메뉴로 바꿔주세요",
@@ -155,7 +155,7 @@ test("a mark without a crop omits the picture segment", () => {
 });
 
 test("the 처리 line embeds the given cli prefix verbatim", () => {
-	const other = "/usr/bin/node /opt/vb/bin/vb.mjs";
+	const other = "/usr/bin/node /opt/desk/bin/desk.mjs";
 	const text = feedbackMessage({
 		summary,
 		board,
@@ -179,7 +179,7 @@ test("pendingNotice lists one line per item with the cli prefix", () => {
 	assert.equal(
 		pendingNotice(items, CLI),
 		[
-			"[visual-board] 이 워크트리에 답을 기다리는 기획안이 2건 있습니다.",
+			"[omo-desk] 이 워크트리에 답을 기다리는 기획안이 2건 있습니다.",
 			`- 로그인 개편 (240101-abcd) https://x/p/240101-abcd -> ${CLI} show 240101-abcd`,
 			`- 결제 화면 (240102-efgh) https://x/p/240102-efgh -> ${CLI} show 240102-efgh`,
 		].join("\n"),

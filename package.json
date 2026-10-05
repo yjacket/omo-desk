@@ -1,5 +1,5 @@
 {
-  "name": "omo-visual-board",
+  "name": "omo-desk",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "bin": {
-    "vb": "bin/vb.mjs"
+    "desk": "bin/desk.mjs"
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\""

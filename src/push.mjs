@@ -4,7 +4,7 @@ import path from "node:path";
 
 const RECORD_SIZE = 4096;
 const VAPID_TTL_S = 12 * 60 * 60;
-const VAPID_SUBJECT = "mailto:omo-visual-board@example.invalid";
+const VAPID_SUBJECT = "mailto:omo-desk@example.invalid";
 const SEND_TIMEOUT_MS = 15000;
 const TTL_S = 86400;
 

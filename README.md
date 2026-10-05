@@ -1,4 +1,4 @@
-# omo-visual-board
+# omo-desk
 
 English | [한국어](README.ko.md)
 
@@ -6,17 +6,17 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 
 ## What it does
 
-- `vb submit <boardDir>` validates a board folder, copies every referenced file into a permanent record and prints a URL.
+- `desk submit <boardDir>` validates a board folder, copies every referenced file into a permanent record and prints a URL.
 - The inbox (`검토함`) lists open proposals by product (git remote) and feature (branch + worktree).
 - The proposal page shows the board, lets you mark regions on frames, answer questions, comment, then ask for a revision (`재요청`), approve (`승인`) or close.
 - Feedback is written to the owning session's mailbox. The senpi extension delivers it into that session as a follow-up turn.
-- Sessions answer with `vb reply`, `vb revise` or `vb close`. Every step is an event; nothing is overwritten.
+- Sessions answer with `desk reply`, `desk revise` or `desk close`. Every step is an event; nothing is overwritten.
 - Over Tailscale the same pages are served on `https://<machine>.<tailnet>.ts.net:4378`, so you can review from your phone.
 
 ## Install
 
 ```powershell
-.\install.ps1                 # = node bin\vb.mjs install
+.\install.ps1                 # = node bin\desk.mjs install
 .\install.ps1 --no-tailscale  # skip tailscale serve
 .\install.ps1 --no-autostart  # skip the HKCU Run value
 ```
@@ -30,8 +30,8 @@ Steps, in order, each reporting `written | unchanged | skipped | failed:<reason>
 | 0 | `stop` | If `/api/health` answers, POST `/api/shutdown` and wait until health fails (up to 5 s). |
 | 1 | `app` | Delete `<home>/app`, copy `bin src web extension skill rules package.json` into it. |
 | 2 | `launcher` | Write `<home>/launch-hidden.vbs`, which runs node with `--max-semi-space-size=1 --max-old-space-size=128` on `<home>\app\src\server.mjs`, hidden. |
-| 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `omo-visual-board` = `wscript.exe "<home>\launch-hidden.vbs"`. |
-| 4 | `extension` | Copy to `<agentDir>/extensions/visual-board.ts`. |
+| 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `omo-desk` = `wscript.exe "<home>\launch-hidden.vbs"`. |
+| 4 | `extension` | Copy to `<agentDir>/extensions/omo-desk.ts`. |
 | 5 | `skill` | Replace `~/.agents/skills/visual-board/` and `~/.claude/skills/visual-board/` with `<app>/skill/`. |
 | 6 | `rule` | Copy `rules/visual-board.md` to `~/.claude/rules/visual-board.md`. |
 | 7 | `config` | Read `tailscale status --json` into `publicBase`, `pcTailnetIps`, `owner`. Tailscale missing or not Running gives `null`, `[]`, `null`. |
@@ -40,15 +40,15 @@ Steps, in order, each reporting `written | unchanged | skipped | failed:<reason>
 
 The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니다.` Run `/reload` in open omo sessions.
 
-`<home>` is `OMO_VISUAL_BOARD_HOME` or `~/.omo-visual-board`. `<agentDir>` is `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` or `~/.omo/agent`.
+`<home>` is `OMO_DESK_HOME` or `~/.omo-desk`. `<agentDir>` is `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` or `~/.omo/agent`.
 
-`vb uninstall` shuts the server down, deletes the Run value, removes the extension, both skill dirs and the rule, turns the 4378 handler off with the same guard, removes `<home>/app`, the launcher, `config.json` and `server.json`. It keeps `<home>/data` and prints `data kept: <path>`.
+`desk uninstall` shuts the server down, deletes the Run value, removes the extension, both skill dirs and the rule, turns the 4378 handler off with the same guard, removes `<home>/app`, the launcher, `config.json` and `server.json`. It keeps `<home>/data` and prints `data kept: <path>`.
 
-`vb doctor` checks health, the Run value, the launcher, the extension matching the app copy, skill and rule present, the 4378 handler present, no 4378 key in AllowFunnel, and the current 443 Web entry and AllowFunnel deep-equal `config.baseline443`. It prints `<check>: ok|fail <detail>` and exits 0 only when every check is ok.
+`desk doctor` checks health, the Run value, the launcher, the extension matching the app copy, skill and rule present, the 4378 handler present, no 4378 key in AllowFunnel, and the current 443 Web entry and AllowFunnel deep-equal `config.baseline443`. It prints `<check>: ok|fail <detail>` and exits 0 only when every check is ok.
 
 ## Use (CLI table)
 
-`vb` isn't on PATH. Agents run `node "<home>/app/bin/vb.mjs" <command>`; the server and CLI print that exact prefix in their hints. `--json` prints the raw response JSON instead of the human lines.
+`desk` isn't on PATH. Agents run `node "<home>/app/bin/desk.mjs" <command>`; the server and CLI print that exact prefix in their hints. `--json` prints the raw response JSON instead of the human lines.
 
 | Command | Human stdout | Exit |
 | --- | --- | --- |
@@ -63,11 +63,11 @@ The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니�
 | `server status\|start\|stop\|restart` | `running pid=<pid> port=<port> version=<v>` or `stopped` | 0; 7 stopped (status) |
 | `install [--no-tailscale] [--no-autostart]`, `uninstall`, `doctor` | `<step>: <result>` lines | 0 ok; 1 any failed |
 
-Exit 8 prints `open proposal exists: <id> <url> - use: vb revise <id> <boardDir>, or vb submit --new` on stderr.
+Exit 8 prints `open proposal exists: <id> <url> - use: desk revise <id> <boardDir>, or desk submit --new` on stderr.
 
-`submit` and `revise` send the absolute board dir and the identity of the current directory; the server validates. Before talking to the server the CLI runs `ensure`: GET `/api/health` (1500 ms timeout). A foreign answer exits 3. On a version mismatch the CLI restarts the server (`/api/shutdown`, then a relaunch) only when the installed app's version equals the CLI's. Otherwise it warns `server version <x> differs from cli <y>; run install to update` and keeps using the running server. No answer launches the server, then up to 20 health checks. `VB_URL` overrides the base URL, `VB_NO_ENSURE=1` skips launching, `VB_WAIT_POLL_MS` (default 2000) and `VB_ENSURE_POLL_MS` (default 500) set poll intervals.
+`submit` and `revise` send the absolute board dir and the identity of the current directory; the server validates. Before talking to the server the CLI runs `ensure`: GET `/api/health` (1500 ms timeout). A foreign answer exits 3. On a version mismatch the CLI restarts the server (`/api/shutdown`, then a relaunch) only when the installed app's version equals the CLI's. Otherwise it warns `server version <x> differs from cli <y>; run install to update` and keeps using the running server. No answer launches the server, then up to 20 health checks. `DESK_URL` overrides the base URL, `DESK_NO_ENSURE=1` skips launching, `DESK_WAIT_POLL_MS` (default 2000) and `DESK_ENSURE_POLL_MS` (default 500) set poll intervals.
 
-On Windows the server is created through `Win32_Process.Create` (PowerShell, hidden) so it outlives the caller's terminal. If WMI fails, or any env key starts with `OMO_VISUAL_BOARD_` or `VB_`, it falls back to a detached `spawn`.
+On Windows the server is created through `Win32_Process.Create` (PowerShell, hidden) so it outlives the caller's terminal. If WMI fails, or any env key starts with `OMO_DESK_` or `DESK_`, it falls back to a detached `spawn`.
 
 ## Board format
 
@@ -135,7 +135,7 @@ See `skill/example/` for a working board.
 
 ## HTTP API
 
-Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and `x-vb: 1` (else 403). Body limit 30 MiB (else 413). `/api/*` responses are `cache-control: no-store`; revision files are `public, max-age=31536000, immutable`.
+Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and `x-desk: 1` (else 403). Body limit 30 MiB (else 413). `/api/*` responses are `cache-control: no-store`; revision files are `public, max-age=31536000, immutable`.
 
 | Method | Path | Access | Response |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | GET | `/web/<file>` | read | static file |
 | GET | `/sw.js` | read | the service worker (`Service-Worker-Allowed: /`, `cache-control: no-cache`) |
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | file; traversal -> 403 |
-| GET | `/api/health` | read | `{ ok, name: 'omo-visual-board', version, pid, port }` |
+| GET | `/api/health` | read | `{ ok, name: 'omo-desk', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
 | GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts = unfiltered `{ mine, theirs, closed }`) |
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
@@ -166,7 +166,7 @@ Errors: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `ba
 
 `/api/open` targets come from `web/targets.json` (ChatGPT, Claude, Claude app, Aside, copy). PC-only targets need `open` access. Aside gets the board URL with `--single-argument`; others go through `rundll32 url.dll,FileProtocolHandler`.
 
-If the port is already held by an omo-visual-board server, `node src/server.mjs` exits 0 quietly; anything else is logged and exits 3.
+If the port is already held by an omo-desk server, `node src/server.mjs` exits 0 quietly; anything else is logged and exits 3.
 
 ## Access
 
@@ -188,14 +188,14 @@ So a phone on your tailnet can read and send feedback, but can't submit, close a
 
 ## Session wake
 
-The senpi extension (`extension/visual-board.ts`) does nothing in child or task-member sessions. In a normal session:
+The senpi extension (`extension/omo-desk.ts`) does nothing in child or task-member sessions. In a normal session:
 
 - Every 3 s it reads `<home>/inbox/<session>/*.json`. When the proposal is still `theirs` (or the server is unreachable) it delivers the text as a follow-up message that starts a turn, then deletes the file. An in-memory set prevents double delivery.
-- Every 30 s, at session start and after each delivery it calls `/api/here`. The footer shows `보드 내 차례 {mine} · 세션 차례 {theirs}`. If the server is down it shows `보드 서버 꺼짐` and runs `vb server start` at most once per 120 s.
+- Every 30 s, at session start and after each delivery it calls `/api/here`. The footer shows `보드 내 차례 {mine} · 세션 차례 {theirs}`. If the server is down it shows `보드 서버 꺼짐` and runs `desk server start` at most once per 120 s.
 - Notices: feedback waiting in this worktree whose owner isn't live (no `/api/here` call in 90 s, ended, child, or no id) is announced once per session. A resumed session is reminded of its own unanswered feedback at start.
 - On shutdown it calls `/api/bye` so the owner counts as gone at once.
 
-Session ids come from `VB_SESSION` or `PI_SESSION_ID`.
+Session ids come from `DESK_SESSION` or `PI_SESSION_ID`.
 
 ## Notifications
 
@@ -204,8 +204,8 @@ The browser gets a notification when something arrives for you, even with the in
 | Trigger | Title | Body |
 | --- | --- | --- |
 | New proposal (not an `existing` resubmit) | `새 기획안 · <title>` | `<product> · <branch>` |
-| `vb revise` | `수정본 <rev> · <title>` | the revise note, else `<product> · <branch>` |
-| `vb reply` | `답이 왔습니다 · <title>` | the reply text, cut to 120 chars |
+| `desk revise` | `수정본 <rev> · <title>` | the revise note, else `<product> · <branch>` |
+| `desk reply` | `답이 왔습니다 · <title>` | the reply text, cut to 120 chars |
 
 Your own feedback and closes never notify. The push is sent after the HTTP response and never delays it; a failed send is logged to `logs/server.log`.
 
