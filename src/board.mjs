@@ -14,7 +14,7 @@ const OPTION_VALUE = /^[A-Za-z0-9_.-]{1,60}$/;
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const TOP_KEYS = new Set(["title", "lead", "sections", "questions", "commentPlaceholder", "id", "sideSession"]);
 const SECTION_KEYS = new Set(["title", "desc", "cards"]);
-const CARD_KEYS = new Set(["badge", "title", "layout", "diagram", "gray", "note", "frames"]);
+const CARD_KEYS = new Set(["badge", "title", "layout", "diagram", "gray", "note", "say", "frames"]);
 const QUESTION_KEYS = new Set(["id", "text", "help", "options"]);
 const OPTION_KEYS = new Set(["value", "label", "rec", "why"]);
 
@@ -129,7 +129,7 @@ function validateCard(card, prefix, root, labels, frames, errors) {
 		return;
 	}
 	pushUnknownKeys(card, CARD_KEYS, prefix, errors);
-	for (const key of ["badge", "title", "note"]) pushOptionalType(card, key, "string", prefix, errors);
+	for (const key of ["badge", "title", "note", "say"]) pushOptionalType(card, key, "string", prefix, errors);
 	for (const key of ["diagram", "gray"]) pushOptionalType(card, key, "boolean", prefix, errors);
 	if (card.layout !== undefined && !LAYOUTS.has(card.layout)) {
 		errors.push(`${prefix}.layout: must be one of "one", "two" or ""`);

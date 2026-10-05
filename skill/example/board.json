@@ -9,6 +9,7 @@
 				{
 					"badge": "흐름",
 					"title": "로그인 후 수강권 확인",
+					"say": "수강생이 로그인하면 먼저 수강권이 있는지 봅니다. 있으면 강의 목록으로, 없으면 수강권 안내로 갑니다.",
 					"layout": "one",
 					"diagram": true,
 					"frames": [["흐름도", "flow.mmd"]]
@@ -19,6 +20,7 @@
 					"layout": "one",
 					"diagram": true,
 					"note": "ENROLLMENT 테이블이 새로 생깁니다.",
+					"say": "회원과 강의를 잇는 수강 등록 테이블이 새로 생깁니다. 등록마다 수강권이 끝나는 날을 함께 저장합니다.",
 					"frames": [["ER", "er.mmd"]]
 				}
 			]

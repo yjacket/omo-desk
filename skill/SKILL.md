@@ -41,7 +41,7 @@ Make a folder `.omo/boards/<slug>/` with `board.json` and the files it points to
 Rules the server checks (schema `visual-board/1`, unknown keys are errors):
 
 - `title` is required. Optional: `lead`, `sections`, `questions`, `commentPlaceholder`, `sideSession`.
-- Card keys: `badge`, `title`, `layout` (`one`, `two` or empty), `diagram`, `gray`, `note`, `frames`.
+- Card keys: `badge`, `title`, `layout` (`one`, `two` or empty), `diagram`, `gray`, `note`, `say`, `frames`.
 - `frames` is a list of `[label, path]`, at least one per card. Labels are unique across the whole board. At most 60 frames.
 - Paths are local, relative, forward slashes, inside the board folder. No URLs, no absolute paths: download images into the folder. Extensions: `.png .jpg .jpeg .gif .webp .svg .mmd`. Max 20 MiB per file, 100 MiB total.
 - The board needs at least one frame or one question.
@@ -52,6 +52,7 @@ Content:
 - Screenshots go in as PNG.
 - Diagrams are mermaid `.mmd` files used directly as frames: `flowchart`, `erDiagram`, `sequenceDiagram`, `stateDiagram-v2`.
 - Every question gets `help` (why it matters). Every option gets `why` (what happens if chosen). Mark exactly one option `rec: true`.
+- Every card gets `say`: one to three Korean sentences that explain its pictures to someone listening without the screen, for example while driving. Say what the picture shows and what it means for the decision. Name things instead of pointing (no 위 그림, 왼쪽), and leave out paths, code and symbols. `듣기` reads the title, `lead`, each card's title and `say`, then every question with its options and `why`, so write those to be heard as well.
 - Write user-facing text in Korean, short and label-level.
 
 See `example/` for a working board.
@@ -70,6 +71,7 @@ It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as 
 
 - The extension delivers the user's feedback to you as a message. Read it in full with `vb show <id>`.
 - Answer a comment: `vb reply <id> <text>`.
+- The user may answer every question in one comment, often dictated by voice. Match each answer to its question. When they ask for more explanation, revise the board with a fuller `say` (and `lead`) rather than only replying.
 - Change the board: edit the folder, then `vb revise <id> .omo/boards/<slug> --note "<what changed>"`.
 - Once the user chose 승인 and the work is done: `vb close <id> <summary>`. Copy the printed `record:` line into your report.
 - Not running under senpi? Start `vb wait <id>` in the background. It prints `FEEDBACK <id> <seq>` with the message when the user answers, or `CLOSED <id>`.

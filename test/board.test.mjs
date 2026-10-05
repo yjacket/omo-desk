@@ -254,6 +254,14 @@ test("unknown card key is rejected", () => {
 	assert.ok(errors(runBoard(board))[0].includes("sections[0].cards[0].color: unknown key"));
 });
 
+test("card say must be a string", () => {
+	const board = okBoard();
+	board.sections[0].cards[0].say = "로그인 다음에 수강권을 먼저 확인합니다.";
+	assert.equal(runBoard(board).ok, true);
+	board.sections[0].cards[0].say = 3;
+	assert.ok(errors(runBoard(board)).some((e) => e.startsWith("sections[0].cards[0].say")));
+});
+
 test("more than 60 frames is rejected", () => {
 	const frames = Array.from({ length: 61 }, (_, i) => [`f${i}`, "img/a.png"]);
 	const board = { title: "t", sections: [{ title: "s", cards: [{ frames }] }] };

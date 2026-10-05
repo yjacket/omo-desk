@@ -32,6 +32,7 @@
 		chips: $("chips"),
 		title: $("title"),
 		lead: $("lead"),
+		listenBtn: $("listenBtn"),
 		tabs: $("tabs"),
 		loadError: $("loadError"),
 		revBanner: $("revBanner"),
@@ -272,6 +273,7 @@
 	async function selectRev(wanted, { replace = true } = {}) {
 		const n = state.revs.some((r) => r.n === wanted) ? wanted : state.latest;
 		if (n === state.rev) return;
+		stopListening();
 		state.rev = n;
 		state.readOnly = n !== state.latest;
 		if (replace) {
@@ -959,6 +961,126 @@
 		closeViewer();
 	});
 
+	// ---------- read aloud ----------
+
+	// Short pieces: Chrome cuts off a long utterance, and 멈추기 then acts at once.
+	const SAY_MAX = 160;
+	// The run in progress; a stopped or replaced run ignores its late utterance events.
+	let reading = null;
+
+	// Sentences joined for the ear: each piece ends with a full stop unless it already ends a sentence.
+	function spoken(...pieces) {
+		return pieces
+			.filter(Boolean)
+			.map((piece) => String(piece).trim())
+			.filter(Boolean)
+			.map((piece) => (/[.!?。]$/.test(piece) ? piece : `${piece}.`))
+			.join(" ");
+	}
+
+	function sayChunks(text) {
+		const out = [];
+		for (const sentence of String(text).replace(/\s+/g, " ").trim().split(/(?<=[.!?。])\s+/)) {
+			let rest = sentence;
+			while (rest.length > SAY_MAX) {
+				const cut = rest.lastIndexOf(" ", SAY_MAX);
+				const at = cut > SAY_MAX / 4 ? cut : SAY_MAX;
+				out.push(rest.slice(0, at));
+				rest = rest.slice(at).trim();
+			}
+			if (rest) out.push(rest);
+		}
+		return out;
+	}
+
+	// What 듣기 reads, in order, each with the node to outline and bring into view while it is read.
+	function listenParts() {
+		const board = state.boards[state.rev] || {};
+		const parts = [];
+		const newest = state.events[state.events.length - 1];
+		if (newest && newest.type === "reply" && newest.text) parts.push({ text: spoken("세션 답", newest.text), node: null });
+		const revised = state.events.find((ev) => ev.type === "revised" && ev.rev === state.rev);
+		if (revised && revised.note) parts.push({ text: spoken("바뀐 점", revised.note), node: null });
+		parts.push({ text: spoken(state.summary.title), node: el.title });
+		if (board.lead) parts.push({ text: spoken(board.lead), node: el.lead });
+		const groups = el.sections.querySelectorAll("section.group");
+		(board.sections || []).forEach((section, si) => {
+			const group = groups[si] || null;
+			parts.push({ text: spoken(section.title, section.desc), node: group });
+			const cards = group ? group.querySelectorAll(".card") : [];
+			(section.cards || []).forEach((card, ci) => {
+				const text = spoken(card.title, card.say || card.note);
+				if (text) parts.push({ text, node: cards[ci] || group });
+			});
+		});
+		(board.questions || []).forEach((q, qi) => {
+			parts.push({ text: spoken(`질문 ${qi + 1}`, q.text, q.help), node: el.decideCard });
+			q.options.forEach((o, oi) => {
+				parts.push({ text: spoken(`${oi + 1}번, ${o.label}${o.rec ? ", 추천" : ""}`, o.why), node: el.decideCard });
+			});
+		});
+		parts.push({ text: "여기까지입니다.", node: null });
+		return parts;
+	}
+
+	function markReading(node) {
+		for (const old of document.querySelectorAll(".reading")) old.classList.remove("reading");
+		if (!node) return;
+		node.classList.add("reading");
+		if (document.visibilityState === "visible") node.scrollIntoView({ block: "center", behavior: "smooth" });
+	}
+
+	function setListening(on) {
+		el.listenBtn.textContent = on ? "멈추기" : "듣기";
+		el.listenBtn.setAttribute("aria-pressed", String(on));
+	}
+
+	function stopListening() {
+		if (!reading) return;
+		reading = null;
+		window.speechSynthesis.cancel();
+		markReading(null);
+		setListening(false);
+	}
+
+	// The device's own voice: its default Korean voice when it has one; otherwise the engine picks one for ko-KR.
+	function koreanVoice() {
+		const voices = window.speechSynthesis.getVoices().filter((v) => /^ko\b/i.test(String(v.lang).replace("_", "-")));
+		return voices.find((v) => v.default) || voices.find((v) => v.localService) || voices[0] || null;
+	}
+
+	function startListening() {
+		if (!state.summary) return;
+		const synth = window.speechSynthesis;
+		if (synth.speaking || synth.pending) synth.cancel();
+		if (synth.paused) synth.resume();
+		const run = {};
+		reading = run;
+		const voice = koreanVoice();
+		const queue = [];
+		for (const part of listenParts()) {
+			for (const text of sayChunks(part.text)) {
+				const utterance = new SpeechSynthesisUtterance(text);
+				utterance.lang = "ko-KR";
+				if (voice) utterance.voice = voice;
+				utterance.onstart = () => {
+					if (reading === run) markReading(part.node);
+				};
+				utterance.onerror = (e) => {
+					if (reading !== run || e.error === "interrupted" || e.error === "canceled") return;
+					console.error("read aloud", e.error);
+					stopListening();
+				};
+				queue.push(utterance);
+			}
+		}
+		queue[queue.length - 1].onend = () => {
+			if (reading === run) stopListening();
+		};
+		setListening(true);
+		for (const utterance of queue) synth.speak(utterance);
+	}
+
 	// ---------- questions and comment ----------
 
 	function renderDecide() {
@@ -1180,7 +1302,7 @@
 		const head = PROMPT_HEAD.concat([`[보드] ${board.title || (state.summary ? state.summary.title : "")}`, board.lead || "", ""]);
 		for (const section of board.sections || []) {
 			head.push(`[구획] ${section.title}${section.desc ? ` - ${section.desc}` : ""}`);
-			for (const card of section.cards || []) if (card.note) head.push(`- ${card.note}`);
+			for (const card of section.cards || []) for (const text of [card.say, card.note]) if (text) head.push(`- ${text}`);
 		}
 		head.push("");
 		(board.questions || []).forEach((q, i) => {
@@ -1372,6 +1494,8 @@
 	el.sendBtn.addEventListener("click", () => send("change"));
 	el.approveBtn.addEventListener("click", () => send("approve"));
 	el.closeBtn.addEventListener("click", dismiss);
+	el.listenBtn.hidden = !("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);
+	el.listenBtn.addEventListener("click", () => (reading ? stopListening() : startListening()));
 	el.revBannerBtn.addEventListener("click", () => {
 		if (state.bannerRev != null) selectRev(state.bannerRev);
 	});

@@ -77,7 +77,7 @@ A board is a folder with `board.json` (schema `visual-board/1`) and the files it
 { title: string (required, non-empty),
   lead?: string,
   sections?: [{ title: string, desc?: string,
-    cards: [{ badge?, title?, layout?: 'one'|'two'|'', diagram?: boolean, gray?: boolean, note?,
+    cards: [{ badge?, title?, layout?: 'one'|'two'|'', diagram?: boolean, gray?: boolean, note?, say?,
               frames: [[label, path], ...] (>= 1) }] }],
   questions?: [{ id: /^[A-Za-z0-9_-]{1,40}$/ unique, text, help?,
     options: [{ value: /^[A-Za-z0-9_.-]{1,60}$/ unique in the question, label, rec?: boolean, why? }] (>= 2) }],
@@ -86,6 +86,7 @@ A board is a folder with `board.json` (schema `visual-board/1`) and the files it
 
 - Strict: any other key is an error. The prototype's top-level `id` is ignored and `sideSession` (string) shows as a gray note above `정할 것`.
 - Frame labels are unique across the whole board; marks reference frames by label.
+- `say` (card) is what `듣기` says for the card after its title, instead of its note: the pictures explained for the ear, in Korean.
 - Up to 60 frames and 30 questions. A board needs at least one frame or one question.
 - Frame paths are local files only. URLs and absolute paths are errors (`download the image into the board dir`), so the record keeps every picture it showed. Relative, forward slashes, no `:`, no empty / `.` / `..` segment, at most 200 chars, extension `.png .jpg .jpeg .gif .webp .svg .mmd`, a regular file inside the board dir.
 - Collected files: `board.json`, every referenced frame, and for each `x.svg` its sibling `x.mmd` if it exists. The folder is never walked. Each file at most 20 MiB, total at most 100 MiB.
@@ -103,6 +104,8 @@ See `skill/example/` for a working board.
 - On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no `표시하기` and no sheet.
 - `재요청` sends your answers, comment and boxes and asks the session for a revised board; it needs at least one of them. `승인` sends the same and approves the proposal: the session does the work without showing it again and closes it. Only an approval is tagged in the conversation.
 - Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
+- `듣기` next to the title reads the open revision aloud with the device's own voice (Web Speech `speechSynthesis`, Korean). Order: the session's reply when it is the newest event; on a revised proposal, what changed (the revise note); the title; the lead; each section title, then each card's title and its `say` (else its note); each question with its options, saying which one is recommended and its `why`; then `여기까지입니다`. While it reads, the button says `멈추기`, the card being read is outlined and scrolled into view. Switching revision stops it.
+- To answer by voice, use the phone keyboard's microphone in `전체 의견`. One comment can answer every question.
 
 ## Data layout
 
@@ -240,5 +243,6 @@ Tests use temp homes, port 0, fake runners for `reg`, `tailscale` and `wscript`,
 - Proposals submitted before a repo gets a remote keep the `local/<name>` product key.
 - The phone tap inside the Orca mobile app is not machine-verified.
 - Viewer pinch and pan are checked with emulated touch in Chromium, not on a real phone. The comment sheet staying above the on-screen keyboard is not machine-checked.
+- `듣기` uses the browser's speech synthesis, so it can stop when the browser goes to the background or the screen turns off.
 - Single user: the tailnet owner check assumes one login.
 - `/api/open` URLs are capped at 30000 chars (Windows command-line limit); longer content is copied instead.
