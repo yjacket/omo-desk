@@ -26,6 +26,7 @@ export function layout(env = process.env) {
 		proposals: path.join(home, "data", "proposals"),
 		inbox: path.join(home, "inbox"),
 		logs: path.join(home, "logs"),
+		push: path.join(home, "push"),
 		config: path.join(home, "config.json"),
 		serverJson: path.join(home, "server.json"),
 		launcher: path.join(home, "launch-hidden.vbs"),

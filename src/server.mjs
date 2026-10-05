@@ -9,6 +9,7 @@ import { validateBoard } from "./board.mjs";
 import { classify, ALLOW, postGuard } from "./access.mjs";
 import { feedbackMessage, pendingNotice, footerText } from "./message.mjs";
 import { createStore } from "./store.mjs";
+import { createPusher } from "./push.mjs";
 
 const BODY_LIMIT = 30 * 1024 * 1024;
 const URL_LIMIT = 30000;
@@ -35,6 +36,24 @@ const TYPES = {
 };
 
 const INVALID_SEGMENT = /^(?:|\.|\.\.)$/;
+const ENDPOINT_LIMIT = 2048;
+const REPLY_BODY_LIMIT = 120;
+const WELCOME = { title: "알림이 켜졌습니다", body: "새 기획안과 답이 오면 알려 드립니다", url: "/", tag: "vb-welcome" };
+
+function validSubscription(value) {
+	if (!value || typeof value !== "object" || !value.keys || typeof value.keys !== "object") return false;
+	const { endpoint } = value;
+	if (typeof endpoint !== "string" || endpoint.length > ENDPOINT_LIMIT) return false;
+	try {
+		if (new URL(endpoint).protocol !== "https:") return false;
+	} catch {
+		return false;
+	}
+	const { p256dh, auth } = value.keys;
+	if (typeof p256dh !== "string" || typeof auth !== "string") return false;
+	const point = Buffer.from(p256dh, "base64url");
+	return point.length === 65 && point[0] === 0x04 && Buffer.from(auth, "base64url").length === 16;
+}
 
 function toSlash(value) {
 	return String(value).replace(/\\/g, "/");
@@ -93,7 +112,7 @@ function fail(code, message) {
 	return error;
 }
 
-export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", config = {}, now = () => new Date(), asidePath = null } = {}) {
+export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", config = {}, now = () => new Date(), asidePath = null, pusher = null } = {}) {
 	if (!home) throw fail("bad_input", "home is required");
 	const cfg = { v: 1, port, publicBase: null, pcTailnetIps: [], owner: null, ...config };
 	const dir = {
@@ -101,9 +120,11 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 		inbox: path.join(home, "inbox"),
 		proposals: path.join(home, "data", "proposals"),
 		logs: path.join(home, "logs"),
+		push: path.join(home, "push"),
 	};
 	const cli = `node "${toSlash(path.join(home, "app", "bin", "vb.mjs"))}"`;
 	const store = createStore({ dataDir: dir.data, inboxDir: dir.inbox, now });
+	const push = pusher ?? createPusher({ dir: dir.push, log: (line) => appendLog(dir.logs, line) });
 	const targets = readTargets(webDir);
 	const version = readVersion();
 	const aside = asidePath ?? asideExe();
@@ -210,6 +231,19 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 		sendFile(res, file);
 	}
 
+	// Fire and forget: called after the response is written, never awaited by a handler.
+	function notifyLater(message) {
+		Promise.resolve()
+			.then(() => push.notify(message))
+			.catch((error) => appendLog(dir.logs, `push notify failed: ${error && error.stack ? error.stack : error}`));
+	}
+
+	function proposalMessage(title, body, id) {
+		return { title, body, url: `/p/${id}`, tag: `vb-${id}` };
+	}
+
+	const where = (summary) => `${summary.product.name || summary.product.key} \u00b7 ${summary.feature.branch}`;
+
 	async function handleGet(res, rawPath, query, access) {
 		const parts = rawPath.split("/");
 
@@ -229,11 +263,19 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			}
 			return sendFile(res, path.join(webDir, name));
 		}
+		if (rawPath === "/sw.js") {
+			if (!guard(res, access, "read")) return;
+			return sendFile(res, path.join(webDir, "sw.js"), { "service-worker-allowed": "/", "cache-control": "no-cache" });
+		}
 		if (parts[1] === "files" && parts.length >= 5) {
 			if (!guard(res, access, "read")) return;
 			return handleFileGet(res, parts);
 		}
 		if (parts[1] === "api") {
+			if (parts[2] === "push" && parts[3] === "key" && parts.length === 4) {
+				if (!guard(res, access, "read")) return;
+				return sendJson(res, 200, { publicKey: push.publicKey });
+			}
 			if (parts[2] === "health" && parts.length === 3) {
 				if (!guard(res, access, "read")) return;
 				return sendJson(res, 200, { ok: true, name: NAME, version, pid: process.pid, port: actualPort });
@@ -364,6 +406,10 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			if (!guard(res, access, "session")) return;
 			return handleCreate(res, body);
 		}
+		if (parts[1] === "api" && parts[2] === "push" && parts.length === 4 && (parts[3] === "subscribe" || parts[3] === "unsubscribe")) {
+			if (!guard(res, access, "feedback")) return;
+			return parts[3] === "subscribe" ? handleSubscribe(res, req, body, access) : handleUnsubscribe(res, body);
+		}
 		if (parts[1] === "api" && parts[2] === "bye" && parts.length === 3) {
 			if (!guard(res, access, "session")) return;
 			if (body.session) lastSeen.delete(body.session);
@@ -394,7 +440,9 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			if (action === "reply") {
 				if (!guard(res, access, "session")) return;
 				const summary = store.reply(id, { text: body.text, session: body.session ?? null });
-				return sendJson(res, 200, { summary });
+				sendJson(res, 200, { summary });
+				notifyLater(proposalMessage(`답이 왔습니다 · ${summary.title}`, String(body.text ?? "").slice(0, REPLY_BODY_LIMIT), summary.id));
+				return;
 			}
 			if (action === "close") {
 				if (!guard(res, access, "session")) return;
@@ -415,6 +463,23 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 		return createWith(res, body, identity);
 	}
 
+	function handleSubscribe(res, req, body, access) {
+		if (!validSubscription(body.subscription)) return sendJson(res, 400, { error: "bad_input" });
+		const { endpoint, keys } = body.subscription;
+		const subscription = { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth } };
+		push.subscribe(subscription, { ua: String(req.headers["user-agent"] || "").slice(0, 200), via: access });
+		sendJson(res, 200, { ok: true });
+		Promise.resolve()
+			.then(() => push.notifyOne(subscription, WELCOME))
+			.catch((error) => appendLog(dir.logs, `push welcome failed: ${error && error.stack ? error.stack : error}`));
+	}
+
+	function handleUnsubscribe(res, body) {
+		if (typeof body.endpoint !== "string" || !body.endpoint) return sendJson(res, 400, { error: "bad_input" });
+		push.unsubscribe(body.endpoint);
+		return sendJson(res, 200, { ok: true });
+	}
+
 	function createWith(res, body, identity) {
 		const validated = validateBoard(body.srcDir);
 		if (!validated.ok) return sendJson(res, 400, { error: "invalid_board", details: validated.errors });
@@ -427,7 +492,8 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			note: body.note ?? null,
 			force: body.force === true,
 		});
-		return sendJson(res, 200, { summary, url: url(summary.id), existing: existing === true });
+		sendJson(res, 200, { summary, url: url(summary.id), existing: existing === true });
+		if (existing !== true) notifyLater(proposalMessage(`새 기획안 · ${summary.title}`, where(summary), summary.id));
 	}
 
 	function handleRevise(res, id, body) {
@@ -439,7 +505,9 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			note: body.note ?? null,
 			session: body.session ?? null,
 		});
-		return sendJson(res, 200, { summary, url: url(summary.id) });
+		sendJson(res, 200, { summary, url: url(summary.id) });
+		const note = typeof body.note === "string" ? body.note.trim().slice(0, REPLY_BODY_LIMIT) : "";
+		notifyLater(proposalMessage(`수정본 ${summary.rev} · ${summary.title}`, note || where(summary), summary.id));
 	}
 
 	function handleFeedback(res, req, id, body, access) {

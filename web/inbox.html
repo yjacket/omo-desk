@@ -83,7 +83,27 @@
 			-webkit-font-smoothing: antialiased;
 		}
 		.page { max-width: var(--measure); margin: 0 auto; padding: var(--s6) var(--s4) var(--s10); }
-		.top { margin-bottom: var(--s5); }
+		.top { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s5); }
+		.top[hidden], .bell[hidden] { display: none; }
+		.bell {
+			flex: none;
+			font: inherit;
+			font-size: var(--fs-cap);
+			color: var(--ink-2);
+			background: var(--surface);
+			border: 1px solid var(--line);
+			border-radius: var(--r-ctl);
+			height: 34px;
+			padding: 0 var(--s3);
+			white-space: nowrap;
+			cursor: pointer;
+			transition: background-color var(--t-micro);
+		}
+		.bell:hover:not(:disabled) { background-color: var(--wash-1); }
+		.bell:active:not(:disabled) { background-color: var(--wash-2); }
+		.bell:disabled { color: var(--ink-3); background: transparent; cursor: default; }
+		.bell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+		.bell[data-state="on"] { color: var(--ok); }
 		h1 { margin: 0; font-size: var(--fs-title); font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
 
 		/* filters */
@@ -289,6 +309,7 @@
 	<div class="page">
 		<header class="top">
 			<h1>검토함</h1>
+			<button type="button" class="bell" id="bell" hidden>알림 받기</button>
 		</header>
 		<main>
 			<div class="filters">
@@ -347,6 +368,90 @@
 			let requestSeq = 0;
 			let timer = null;
 			let loaded = false;
+
+			const bell = document.getElementById("bell");
+			const BELL_LABEL = { off: "알림 받기", on: "알림 켜짐", blocked: "알림 막힘" };
+
+			function setBell(next) {
+				bell.dataset.state = next;
+				bell.textContent = BELL_LABEL[next];
+				bell.disabled = next === "blocked";
+			}
+
+			function postJson(path, body) {
+				return fetch(path, {
+					method: "POST",
+					headers: { "content-type": "application/json", "x-vb": "1" },
+					body: JSON.stringify(body),
+				});
+			}
+
+			function keyBytes(text) {
+				const raw = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
+				return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+			}
+
+			async function turnOn() {
+				if ((await Notification.requestPermission()) !== "granted") {
+					setBell(Notification.permission === "denied" ? "blocked" : "off");
+					return;
+				}
+				const registration = await navigator.serviceWorker.register("/sw.js");
+				await navigator.serviceWorker.ready;
+				const keyRes = await fetch("/api/push/key", { cache: "no-store" });
+				if (!keyRes.ok) throw new Error(`HTTP ${keyRes.status}`);
+				const { publicKey } = await keyRes.json();
+				const subscription = await registration.pushManager.subscribe({
+					userVisibleOnly: true,
+					applicationServerKey: keyBytes(publicKey),
+				});
+				const res = await postJson("/api/push/subscribe", { subscription: subscription.toJSON() });
+				if (!res.ok) {
+					await subscription.unsubscribe();
+					throw new Error(`HTTP ${res.status}`);
+				}
+				setBell("on");
+			}
+
+			async function turnOff() {
+				const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+				const subscription = registration ? await registration.pushManager.getSubscription() : null;
+				if (subscription) {
+					const endpoint = subscription.endpoint;
+					await subscription.unsubscribe();
+					await postJson("/api/push/unsubscribe", { endpoint });
+				}
+				setBell("off");
+			}
+
+			async function initBell() {
+				if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
+				bell.hidden = false;
+				if (Notification.permission === "denied") {
+					setBell("blocked");
+					return;
+				}
+				let subscribed = false;
+				try {
+					const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+					subscribed = Boolean(registration && (await registration.pushManager.getSubscription()));
+				} catch (error) {
+					console.error("inbox: push state failed", error);
+				}
+				setBell(subscribed ? "on" : "off");
+			}
+
+			bell.addEventListener("click", async () => {
+				bell.disabled = true;
+				try {
+					if (bell.dataset.state === "on") await turnOff();
+					else await turnOn();
+				} catch (error) {
+					console.error("inbox: push toggle failed", error);
+					await initBell();
+				}
+				bell.disabled = bell.dataset.state === "blocked";
+			});
 
 			function h(tag, attrs, ...children) {
 				const el = document.createElement(tag);
@@ -493,11 +598,16 @@
 				select.value = value;
 			}
 
+			// Only open proposals are counted; a bare name (no "(0)") means everything there is closed.
+			function withOpen(name, open) {
+				return open > 0 ? `${name} (${open})` : name;
+			}
+
 			function renderFilters() {
 				const products = [{ value: "", label: "전체" }];
 				let chosen = null;
 				for (const product of facets) {
-					products.push({ value: product.key, label: `${product.name || product.key} (${product.open})` });
+					products.push({ value: product.key, label: withOpen(product.name || product.key, product.open) });
 					if (product.key === state.product) chosen = product;
 				}
 				if (state.product && !chosen) products.push({ value: state.product, label: state.product });
@@ -506,7 +616,7 @@
 				const features = [{ value: "", label: "전체" }];
 				let known = false;
 				for (const feature of chosen ? chosen.features : []) {
-					features.push({ value: feature.branch, label: `${feature.branch} (${feature.open})` });
+					features.push({ value: feature.branch, label: withOpen(feature.branch, feature.open) });
 					if (feature.branch === state.feature || feature.key === state.feature) known = true;
 				}
 				if (state.feature && !known) features.push({ value: state.feature, label: state.feature });
@@ -607,6 +717,7 @@
 
 			renderFilters();
 			load();
+			initBell();
 			if (document.visibilityState === "visible") startTimer();
 		})();
 	</script>
