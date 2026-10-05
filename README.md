@@ -93,6 +93,16 @@ A board is a folder with `board.json` (schema `visual-board/1`) and the files it
 
 See `skill/example/` for a working board.
 
+## Proposal page
+
+- Inline frames: a mouse or pen drag on a frame draws a numbered box right there. Touch never draws inline, so a finger over a frame scrolls the page.
+- Tap or click a frame without dragging (under 8 px of movement) and the frame opens full screen in the viewer. It works for pictures and for rendered `.mmd` diagrams.
+- The viewer is a dialog over the page with a top bar: the frame label, a `네모 그리기` toggle and `닫기`. The picture starts fitted to the screen. Two fingers pinch-zoom (1x to 8x) around the midpoint, one finger or a mouse drag pans, the mouse wheel zooms around the cursor. The picture can't be dragged off the screen.
+- With `네모 그리기` on, one finger or the mouse draws a box (two fingers still pinch). A box made here is the same as an inline one: normalized to the picture, numbered, listed under `표시한 곳`, sent with the feedback with its crop.
+- Boxes of this frame are drawn in the viewer. Tap one to select it; a `지우기` button appears next to it and removes it everywhere, including the `표시한 곳` list. No scrolling to the bottom.
+- On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no draw toggle and no delete.
+- Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
+
 ## Data layout
 
 ```
@@ -198,5 +208,6 @@ Tests use temp homes, port 0, fake runners for `reg`, `tailscale` and `wscript`,
 - Windows only for install, autostart and launching.
 - Proposals submitted before a repo gets a remote keep the `local/<name>` product key.
 - The phone tap inside the Orca mobile app is not machine-verified.
+- Viewer pinch and pan are checked with emulated touch in Chromium, not on a real phone.
 - Single user: the tailnet owner check assumes one login.
 - `/api/open` URLs are capped at 30000 chars (Windows command-line limit); longer content is copied instead.
