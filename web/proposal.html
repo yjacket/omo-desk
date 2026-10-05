@@ -73,16 +73,15 @@
 	.frames{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:var(--s-5);align-items:start}
 	.frames.two{grid-template-columns:1fr 1fr}
 	.frames.one{grid-template-columns:1fr}
-	.frame{position:relative;min-height:var(--frame-min);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#111;touch-action:none;cursor:crosshair}
+	.frame{position:relative;min-height:var(--frame-min);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#111;touch-action:manipulation;cursor:crosshair}
 	.frame.diagram{background:var(--surface);display:flex;align-items:center;justify-content:center;padding:var(--s-4)}
 	.frame.still{cursor:default}
 	.frame.still canvas{pointer-events:none}
-	body.readonly .frame,body.closed .frame{cursor:default}
-	body.readonly .frame canvas,body.closed .frame canvas{pointer-events:none}
+	body.readonly .frame,body.closed .frame{cursor:zoom-in}
 	.frame img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
 	.frame.diagram img{max-height:720px;width:auto;max-width:100%;margin:0 auto}
 	/* A diagram shorter than --frame-min at fit width is shown --frame-min tall and the frame scrolls sideways (board.js sets .wide). */
-	.frame.diagram.wide{overflow-x:auto;justify-content:flex-start;touch-action:pan-x}
+	.frame.diagram.wide{overflow-x:auto;justify-content:flex-start}
 	.frame.diagram.wide img{height:var(--frame-min);max-width:none}
 	.frame canvas{position:absolute;inset:0;width:100%;height:100%}
 	.frame.plain{display:block;padding:0}
@@ -155,6 +154,22 @@
 	#aiMsg{margin-top:var(--s-3);font-size:var(--fs-sm);color:var(--side-ink)}
 	#aiMsg:empty{display:none}
 
+	/* Full-screen frame viewer: a dialog over the page; the picture is moved by transform, marks are drawn on a canvas in screen px. */
+	body.viewer-open{overflow:hidden}
+	.viewer{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;background:#0b0d12;color:#fff;touch-action:none;overscroll-behavior:contain}
+	.viewer:focus{outline:none}
+	.vbar{flex:none;display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) max(var(--s-4),env(safe-area-inset-right)) var(--s-2) max(var(--s-4),env(safe-area-inset-left));padding-top:max(var(--s-2),env(safe-area-inset-top))}
+	.vlabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-md);font-weight:700}
+	.vbar button{flex:none;min-height:44px;padding:0 var(--s-5);border:none;border-radius:var(--r-md);background:rgba(255,255,255,.14);color:#fff;font-size:var(--fs-md);font-weight:700;cursor:pointer}
+	.vbar button[aria-pressed="true"]{background:var(--mark)}
+	.viewer button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+	.vstage{position:relative;flex:1;min-height:0;overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;margin:0 max(0px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(0px,env(safe-area-inset-left))}
+	.vstage.drawing{cursor:crosshair}
+	.vstage img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;background:#111;pointer-events:none;-webkit-user-drag:none}
+	.viewer.light .vstage img{background:var(--surface)}
+	.vstage canvas{position:absolute;left:0;top:0;pointer-events:none}
+	.vdel{position:absolute;z-index:2;min-width:72px;min-height:44px;padding:0 var(--s-5);border:none;border-radius:var(--r-md);background:var(--edit);color:#fff;font-size:var(--fs-md);font-weight:700;cursor:pointer;box-shadow:var(--shadow-panel)}
+
 	/* Mermaid renders here first so getBBox() has real layout; the result is serialized into an <img>. */
 	#mmdStage{position:absolute;left:-200000px;top:0;width:1600px;visibility:hidden;pointer-events:none}
 
@@ -215,6 +230,18 @@
 	<p>결론은 '전체 의견'에 붙여 넣고 보내세요.</p>
 	<div id="aiTargets"></div>
 	<div id="aiMsg"></div>
+</div>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="그림 보기" tabindex="-1" hidden>
+	<div class="vbar">
+		<span class="vlabel" id="vLabel"></span>
+		<button type="button" id="vDraw" aria-pressed="false">네모 그리기</button>
+		<button type="button" id="vClose">닫기</button>
+	</div>
+	<div class="vstage" id="vStage">
+		<img id="vImg" alt="">
+		<canvas id="vCanvas"></canvas>
+		<button type="button" class="vdel" id="vDel" hidden>지우기</button>
+	</div>
 </div>
 <div id="mmdStage" aria-hidden="true"></div>
 <script src="/web/board.js" defer></script>

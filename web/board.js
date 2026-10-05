@@ -59,6 +59,15 @@
 		targets: $("aiTargets"),
 		aiMsg: $("aiMsg"),
 		stage: $("mmdStage"),
+		main: document.querySelector("main"),
+		viewer: $("viewer"),
+		vLabel: $("vLabel"),
+		vDraw: $("vDraw"),
+		vClose: $("vClose"),
+		vStage: $("vStage"),
+		vImg: $("vImg"),
+		vCanvas: $("vCanvas"),
+		vDel: $("vDel"),
 	};
 	const theme = getComputedStyle(document.documentElement);
 	const MARK_COLOR = theme.getPropertyValue("--mark").trim() || "#1463ff";
@@ -85,6 +94,8 @@
 		prompt: null,
 		mermaid: null,
 		bannerRev: null,
+		// The full-screen frame viewer; scale is relative to the fitted picture, tx/ty place its top-left in the stage.
+		viewer: { open: false, label: "", scale: 1, tx: 0, ty: 0, drawing: false, selected: null },
 	};
 	window.__vb = state;
 
@@ -237,6 +248,7 @@
 		el.sendRow.hidden = !inputsOn;
 		el.marksCard.hidden = !inputsOn && marks.length === 0;
 		for (const node of el.marks.querySelectorAll("textarea,button")) node.disabled = !inputsOn;
+		syncViewer();
 	}
 
 	// ---------- revisions and boards ----------
@@ -435,6 +447,9 @@
 		const diagram = wrap.classList.contains("diagram");
 		let start = null;
 		let cur = null;
+		// Pointer-down position in client px, for telling a tap from a drag; tapped carries a tap from pointerup to the click that follows.
+		let down = null;
+		let tapped = false;
 		function size() {
 			if (diagram) {
 				// Measure at fit width first; a diagram shorter than the frame minimum is shown at that height and scrolls sideways.
@@ -473,7 +488,11 @@
 		img.addEventListener("load", size);
 		if (img.complete && img.naturalWidth) size();
 		canvas.addEventListener("pointerdown", (e) => {
-			if (!canMark()) return;
+			tapped = false;
+			// a second finger is a gesture, not a tap
+			down = down && down.id !== e.pointerId ? null : { id: e.pointerId, x: e.clientX, y: e.clientY };
+			// touch never draws inline: the finger scrolls the page, a tap opens the viewer
+			if (e.pointerType === "touch" || !canMark() || !down) return;
 			if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
 			start = pos(e);
 			cur = start;
@@ -484,6 +503,15 @@
 			redraw();
 		});
 		canvas.addEventListener("pointerup", (e) => {
+			const tap = down && down.id === e.pointerId && Math.max(Math.abs(e.clientX - down.x), Math.abs(e.clientY - down.y)) < MIN_MARK_PX;
+			down = null;
+			if (tap) {
+				start = null;
+				cur = null;
+				redraw();
+				tapped = true;
+				return;
+			}
 			if (!start) return;
 			const end = pos(e);
 			const x = Math.min(start.x, end.x);
@@ -511,9 +539,16 @@
 			updateMode();
 		});
 		canvas.addEventListener("pointercancel", () => {
+			down = null;
 			start = null;
 			cur = null;
 			redraw();
+		});
+		// Open on click, which comes after pointerup: the viewer then cannot receive the touch's compatibility events.
+		canvas.addEventListener("click", () => {
+			if (!tapped) return;
+			tapped = false;
+			openViewer(label, img, diagram);
 		});
 	}
 
@@ -551,6 +586,14 @@
 		}
 	}
 
+	function removeMark(mark) {
+		const at = state.marks.indexOf(mark);
+		if (at !== -1) state.marks.splice(at, 1);
+		redrawAll();
+		renderMarks();
+		updateMode();
+	}
+
 	function renderMarks() {
 		const list = visibleMarks();
 		if (!list.length) {
@@ -572,15 +615,325 @@
 			textarea.addEventListener("input", () => {
 				mark.comment = textarea.value;
 			});
-			item.querySelector(".del").addEventListener("click", () => {
-				state.marks.splice(state.marks.indexOf(mark), 1);
-				redrawAll();
-				renderMarks();
-				updateMode();
-			});
+			item.querySelector(".del").addEventListener("click", () => removeMark(mark));
 			el.marks.appendChild(item);
 		});
 	}
+
+	// ---------- viewer ----------
+
+	const VIEW_MAX_SCALE = 8;
+	const VIEW_HIT_SLOP = 6;
+	const WHEEL_STEP = 0.0015;
+	const WHEEL_PINCH_STEP = 0.01;
+	const vv = state.viewer;
+	const vctx = el.vCanvas.getContext("2d");
+	// Pointers down on the stage, by id, in stage px.
+	const vpoints = new Map();
+	// The picture fitted to the stage at scale 1, and the stage itself, both in CSS px.
+	const vpicture = { w: 0, h: 0 };
+	const vsize = { w: 0, h: 0 };
+	let vsource = null;
+	// null | { type: "pan", last } | { type: "draw", start, cur } | { type: "pinch", d0, s0, px, py }
+	let vgesture = null;
+	let vtap = null;
+	let vopener = null;
+	let vtoken = 0;
+
+	function vNatural() {
+		const rect = vsource.getBoundingClientRect();
+		return { w: vsource.naturalWidth || rect.width || 1, h: vsource.naturalHeight || rect.height || 1 };
+	}
+
+	// Keep the picture on screen: centered on an axis where it is smaller than the stage, edge to edge where it is larger.
+	function vClamp() {
+		const iw = vpicture.w * vv.scale;
+		const ih = vpicture.h * vv.scale;
+		vv.tx = iw <= vsize.w ? (vsize.w - iw) / 2 : Math.min(0, Math.max(vsize.w - iw, vv.tx));
+		vv.ty = ih <= vsize.h ? (vsize.h - ih) / 2 : Math.min(0, Math.max(vsize.h - ih, vv.ty));
+	}
+
+	function vLayout(fresh) {
+		const r = el.vStage.getBoundingClientRect();
+		if (!r.width || !r.height) return;
+		// keep the picture point at the stage center fixed across a resize or rotation
+		const keep = !fresh && vpicture.w ? { x: (vsize.w / 2 - vv.tx) / (vpicture.w * vv.scale), y: (vsize.h / 2 - vv.ty) / (vpicture.h * vv.scale) } : { x: 0.5, y: 0.5 };
+		vsize.w = r.width;
+		vsize.h = r.height;
+		const nat = vNatural();
+		const fit = Math.min(r.width / nat.w, r.height / nat.h);
+		vpicture.w = nat.w * fit;
+		vpicture.h = nat.h * fit;
+		el.vImg.style.width = `${vpicture.w}px`;
+		el.vImg.style.height = `${vpicture.h}px`;
+		vv.tx = vsize.w / 2 - keep.x * vpicture.w * vv.scale;
+		vv.ty = vsize.h / 2 - keep.y * vpicture.h * vv.scale;
+		vClamp();
+		const dpr = window.devicePixelRatio || 1;
+		el.vCanvas.width = Math.round(r.width * dpr);
+		el.vCanvas.height = Math.round(r.height * dpr);
+		el.vCanvas.style.width = `${r.width}px`;
+		el.vCanvas.style.height = `${r.height}px`;
+		vRender();
+	}
+
+	function vPoint(e) {
+		const b = el.vStage.getBoundingClientRect();
+		return { x: e.clientX - b.left, y: e.clientY - b.top };
+	}
+
+	// The box between two stage points, clipped to the picture, in stage px.
+	function vBox(a, b) {
+		const x0 = Math.max(Math.min(a.x, b.x), vv.tx);
+		const y0 = Math.max(Math.min(a.y, b.y), vv.ty);
+		const x1 = Math.min(Math.max(a.x, b.x), vv.tx + vpicture.w * vv.scale);
+		const y1 = Math.min(Math.max(a.y, b.y), vv.ty + vpicture.h * vv.scale);
+		return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+	}
+
+	// Marks of the open frame, numbered like the inline canvases and the list: by position among this revision's marks.
+	function vFrameMarks() {
+		const entries = [];
+		visibleMarks().forEach((mark, i) => {
+			if (mark.frame === vv.label) entries.push({ mark, n: i + 1 });
+		});
+		return entries;
+	}
+
+	function vRect(mark) {
+		const w = vpicture.w * vv.scale;
+		const h = vpicture.h * vv.scale;
+		return { x: vv.tx + mark.x * w, y: vv.ty + mark.y * h, w: mark.w * w, h: mark.h * h };
+	}
+
+	// 지우기 sits just below the selected box, above it when there is no room, inside its top edge as a last resort.
+	function vPlaceDelete() {
+		const mark = vv.selected;
+		el.vDel.hidden = !mark || !canMark();
+		if (el.vDel.hidden) return;
+		const r = vRect(mark);
+		const w = el.vDel.offsetWidth;
+		const h = el.vDel.offsetHeight;
+		const gap = 8;
+		let y = r.y + r.h + gap;
+		if (y + h > vsize.h) y = r.y - h - gap;
+		if (y < 0) y = Math.max(0, Math.min(r.y + gap, vsize.h - h));
+		const x = Math.max(0, Math.min(r.x + r.w - w, vsize.w - w));
+		el.vDel.style.left = `${x}px`;
+		el.vDel.style.top = `${y}px`;
+	}
+
+	function vRender() {
+		if (!vv.open) return;
+		el.vImg.style.transform = `translate(${vv.tx}px, ${vv.ty}px) scale(${vv.scale})`;
+		const dpr = window.devicePixelRatio || 1;
+		vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		vctx.clearRect(0, 0, vsize.w, vsize.h);
+		const entries = vFrameMarks();
+		if (vv.selected && !entries.some((entry) => entry.mark === vv.selected)) vv.selected = null;
+		for (const { mark, n } of entries) {
+			const r = vRect(mark);
+			if (mark === vv.selected) {
+				vctx.fillStyle = MARK_FILL;
+				vctx.fillRect(r.x, r.y, r.w, r.h);
+				vctx.fillRect(r.x, r.y, r.w, r.h);
+			}
+			drawMark(vctx, r.x, r.y, r.w, r.h, n);
+		}
+		if (vgesture && vgesture.type === "draw") {
+			const b = vBox(vgesture.start, vgesture.cur);
+			drawMark(vctx, b.x, b.y, b.w, b.h, 0);
+		}
+		vPlaceDelete();
+	}
+
+	// Called from updateMode: the draw toggle and delete exist only while the proposal accepts marks.
+	function syncViewer() {
+		if (!vv.open) return;
+		const can = canMark();
+		if (!can) vv.drawing = false;
+		el.vDraw.hidden = !can;
+		el.vDraw.setAttribute("aria-pressed", String(vv.drawing));
+		el.vStage.classList.toggle("drawing", vv.drawing);
+		vRender();
+	}
+
+	function openViewer(label, source, diagram) {
+		if (vv.open) return;
+		vsource = source;
+		vopener = document.activeElement;
+		Object.assign(vv, { open: true, label, scale: 1, tx: 0, ty: 0, drawing: false, selected: null });
+		vpoints.clear();
+		vgesture = null;
+		vtap = null;
+		el.vLabel.textContent = label;
+		el.vLabel.title = label;
+		el.viewer.classList.toggle("light", diagram);
+		el.vImg.alt = label;
+		el.vImg.src = source.currentSrc || source.src;
+		el.viewer.hidden = false;
+		document.body.classList.add("viewer-open");
+		for (const node of [el.main, el.fab, el.panel]) node.inert = true;
+		vtoken += 1;
+		history.pushState({ vbViewer: vtoken }, "", location.href);
+		vLayout(true);
+		syncViewer();
+		el.viewer.focus({ preventScroll: true });
+	}
+
+	// Closing by button also steps back over the history entry opening pushed, but only while that entry is still current.
+	function closeViewer({ popped = false } = {}) {
+		if (!vv.open) return;
+		Object.assign(vv, { open: false, drawing: false, selected: null });
+		vpoints.clear();
+		vgesture = null;
+		vtap = null;
+		vsource = null;
+		el.viewer.hidden = true;
+		el.vImg.removeAttribute("src");
+		document.body.classList.remove("viewer-open");
+		for (const node of [el.main, el.fab, el.panel]) node.inert = false;
+		if (vopener && vopener.isConnected && vopener !== document.body) vopener.focus({ preventScroll: true });
+		vopener = null;
+		if (!popped && history.state && history.state.vbViewer === vtoken) history.back();
+	}
+
+	function vSelectAt(p) {
+		if (!canMark()) return;
+		let hit = null;
+		let best = Infinity;
+		for (const { mark } of vFrameMarks()) {
+			const r = vRect(mark);
+			if (p.x < r.x - VIEW_HIT_SLOP || p.x > r.x + r.w + VIEW_HIT_SLOP || p.y < r.y - VIEW_HIT_SLOP || p.y > r.y + r.h + VIEW_HIT_SLOP) continue;
+			if (r.w * r.h < best) {
+				best = r.w * r.h;
+				hit = mark;
+			}
+		}
+		vv.selected = hit;
+	}
+
+	// A finished drag becomes a mark exactly like an inline one: normalized to the picture, then the same list and mode updates.
+	function vFinishDraw(a, b) {
+		const box = vBox(a, b);
+		if (box.w < MIN_MARK_PX || box.h < MIN_MARK_PX) return;
+		const w = vpicture.w * vv.scale;
+		const h = vpicture.h * vv.scale;
+		const mark = {
+			rev: state.rev,
+			frame: vv.label,
+			x: (box.x - vv.tx) / w,
+			y: (box.y - vv.ty) / h,
+			w: box.w / w,
+			h: box.h / h,
+			comment: "",
+			img: vsource,
+		};
+		state.marks.push(mark);
+		// selected, so a slip of the finger can be undone on the spot
+		vv.selected = mark;
+		redrawAll();
+		renderMarks();
+		updateMode();
+	}
+
+	function vPinchFrom() {
+		const [a, b] = [...vpoints.values()];
+		const mx = (a.x + b.x) / 2;
+		const my = (a.y + b.y) / 2;
+		return { mx, my, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+	}
+
+	function vEnd(e) {
+		if (!vpoints.has(e.pointerId)) return;
+		const p = vPoint(e);
+		const up = e.type === "pointerup";
+		const tap = up && vtap && vtap.id === e.pointerId && Math.max(Math.abs(p.x - vtap.x), Math.abs(p.y - vtap.y)) < MIN_MARK_PX;
+		const drawing = up && vgesture && vgesture.type === "draw" ? vgesture : null;
+		vpoints.delete(e.pointerId);
+		vtap = null;
+		// one finger left after a pinch pans; it never starts a box mid-gesture
+		vgesture = vpoints.size ? { type: "pan", last: [...vpoints.values()][0] } : null;
+		if (tap) vSelectAt(p);
+		else if (drawing) vFinishDraw(drawing.start, p);
+		vRender();
+	}
+
+	function vZoomAt(x, y, scale, px, py) {
+		vv.scale = Math.min(VIEW_MAX_SCALE, Math.max(1, scale));
+		vv.tx = x - px * vv.scale;
+		vv.ty = y - py * vv.scale;
+		vClamp();
+	}
+
+	el.vStage.addEventListener("pointerdown", (e) => {
+		if (e.pointerType === "mouse" && e.button !== 0) return;
+		if (vpoints.size >= 2) return;
+		el.vStage.setPointerCapture(e.pointerId);
+		const p = vPoint(e);
+		vpoints.set(e.pointerId, p);
+		if (vpoints.size === 1) {
+			vtap = { id: e.pointerId, x: p.x, y: p.y };
+			vgesture = vv.drawing && canMark() ? { type: "draw", start: p, cur: p } : { type: "pan", last: p };
+		} else {
+			// a second finger turns whatever was going on into a pinch
+			vtap = null;
+			const from = vPinchFrom();
+			vgesture = { type: "pinch", d0: from.d, s0: vv.scale, px: (from.mx - vv.tx) / vv.scale, py: (from.my - vv.ty) / vv.scale };
+		}
+		vRender();
+	});
+	el.vStage.addEventListener("pointermove", (e) => {
+		if (!vpoints.has(e.pointerId)) return;
+		const p = vPoint(e);
+		vpoints.set(e.pointerId, p);
+		if (vtap && vtap.id === e.pointerId && Math.max(Math.abs(p.x - vtap.x), Math.abs(p.y - vtap.y)) >= MIN_MARK_PX) vtap = null;
+		if (!vgesture) return;
+		if (vgesture.type === "pinch") {
+			const from = vPinchFrom();
+			vZoomAt(from.mx, from.my, (vgesture.s0 * from.d) / vgesture.d0, vgesture.px, vgesture.py);
+		} else if (vgesture.type === "pan") {
+			vv.tx += p.x - vgesture.last.x;
+			vv.ty += p.y - vgesture.last.y;
+			vgesture.last = p;
+			vClamp();
+		} else {
+			vgesture.cur = p;
+		}
+		vRender();
+	});
+	el.vStage.addEventListener("pointerup", vEnd);
+	el.vStage.addEventListener("pointercancel", vEnd);
+	el.vStage.addEventListener(
+		"wheel",
+		(e) => {
+			e.preventDefault();
+			const p = vPoint(e);
+			const unit = e.deltaMode === 1 ? 16 : 1;
+			const k = Math.exp(-e.deltaY * unit * (e.ctrlKey ? WHEEL_PINCH_STEP : WHEEL_STEP));
+			vZoomAt(p.x, p.y, vv.scale * k, (p.x - vv.tx) / vv.scale, (p.y - vv.ty) / vv.scale);
+			vRender();
+		},
+		{ passive: false },
+	);
+	el.vDraw.addEventListener("click", () => {
+		vv.drawing = !vv.drawing;
+		syncViewer();
+	});
+	el.vClose.addEventListener("click", () => closeViewer());
+	// the button lives inside the stage: keep its touches away from the pan and draw handlers
+	el.vDel.addEventListener("pointerdown", (e) => e.stopPropagation());
+	el.vDel.addEventListener("click", () => {
+		const mark = vv.selected;
+		vv.selected = null;
+		if (mark) removeMark(mark);
+	});
+	window.addEventListener("popstate", () => closeViewer({ popped: true }));
+	document.addEventListener("keydown", (e) => {
+		if (!vv.open || e.key !== "Escape") return;
+		e.preventDefault();
+		closeViewer();
+	});
 
 	// ---------- questions and comment ----------
 
@@ -1011,7 +1364,10 @@
 		const target = state.caps.targets.find((t) => t.id === button.dataset.target);
 		if (target) openTarget(target);
 	});
-	window.addEventListener("resize", resizeAll);
+	window.addEventListener("resize", () => {
+		resizeAll();
+		if (vv.open) vLayout(false);
+	});
 	document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState === "visible") poll();
 		else if (pollTimer) {
