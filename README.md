@@ -15,6 +15,16 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 
 ## Install
 
+One line in Windows PowerShell installs or updates from GitHub `main` without a checkout. The repository is private, so `gh` must be logged in (`gh auth login`), and Node 24+ is required:
+
+```powershell
+irm https://raw.githubusercontent.com/yjacket/omo-desk/main/install.ps1 -Headers @{ Authorization = "token $(gh auth token)" } | iex
+```
+
+Piped like this, `install.ps1` downloads `main` into a temp folder, runs the same `desk install` as below and deletes the folder. It stops with one line when Node is older than 24 or no GitHub token is found. The options below need the checkout form.
+
+From a checkout:
+
 ```powershell
 .\install.ps1                 # = node bin\desk.mjs install
 .\install.ps1 --no-tailscale  # skip tailscale serve

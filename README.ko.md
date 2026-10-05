@@ -15,6 +15,16 @@
 
 ## 설치
 
+Windows PowerShell 한 줄로 checkout 없이 GitHub `main` 에서 설치하거나 업데이트합니다. 저장소가 비공개라 `gh` 로그인(`gh auth login`)이 필요하고, Node 24 이상이어야 합니다:
+
+```powershell
+irm https://raw.githubusercontent.com/yjacket/omo-desk/main/install.ps1 -Headers @{ Authorization = "token $(gh auth token)" } | iex
+```
+
+이렇게 파이프로 실행하면 `install.ps1` 은 `main` 을 임시 폴더에 받아 아래와 같은 `desk install` 을 실행한 뒤 폴더를 지웁니다. Node가 24보다 낮거나 GitHub 토큰이 없으면 한 줄로 알리고 멈춥니다. 아래 옵션은 checkout 에서 실행할 때만 쓸 수 있습니다.
+
+checkout 에서:
+
 ```powershell
 .\install.ps1                 # = node bin\desk.mjs install
 .\install.ps1 --no-tailscale  # tailscale serve 생략
