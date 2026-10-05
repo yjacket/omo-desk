@@ -50,6 +50,7 @@ export function createDesk(pi, deps = {}) {
 	let sessionId;
 	let timers = [];
 	let running = false;
+	let staleGeneration = false;
 	let lastFooter;
 	let lastSpawnAt = -Infinity;
 	let baseUrlCache;
@@ -65,9 +66,16 @@ export function createDesk(pi, deps = {}) {
 
 	/** Every handler and timer body runs through this: a failure is logged, never thrown into senpi. */
 	const safe = (name, fn) => async (...args) => {
+		if (staleGeneration) return undefined;
 		try {
 			return await fn(...args);
 		} catch (error) {
+			if (String(error?.message ?? error).includes("stale extension generation")) {
+				staleGeneration = true;
+				stop();
+				await log("stopped: extension generation replaced by reload");
+				return undefined;
+			}
 			await log(`${name}: ${String((error && error.stack) || error)}`);
 			return undefined;
 		}

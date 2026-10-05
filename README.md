@@ -194,6 +194,7 @@ The senpi extension (`extension/omo-desk.ts`) does nothing in child or task-memb
 - Every 30 s, at session start and after each delivery it calls `/api/here`. The footer shows `보드 내 차례 {mine} · 세션 차례 {theirs}`. If the server is down it shows `보드 서버 꺼짐` and runs `desk server start` at most once per 120 s.
 - Notices: feedback waiting in this worktree whose owner isn't live (no `/api/here` call in 90 s, ended, child, or no id) is announced once per session. A resumed session is reminded of its own unanswered feedback at start.
 - On shutdown it calls `/api/bye` so the owner counts as gone at once.
+- After `/reload` the replaced copy of the extension stops its timers the first time senpi reports its generation as stale, so only the current copy polls and wakes the session.
 
 Session ids come from `DESK_SESSION` or `PI_SESSION_ID`.
 

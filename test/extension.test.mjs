@@ -361,6 +361,32 @@ test("session_shutdown stops the timers and POSTs /api/bye with the session id",
 	s.cleanup();
 });
 
+test("a stale extension generation stops timers and logs once without a stack trace", async () => {
+	const s = setup();
+	let stale = false;
+	const staleCtx = Object.defineProperties({ ...s.ctx }, {
+		cwd: { get() {
+			if (stale) throw new Error("stale extension generation after reload");
+			return "C:/work/proj";
+		} },
+	});
+	await s.pi.emit("session_start", staleCtx);
+	const timers = [...s.timers];
+	const callbacks = timers.map((entry) => entry.fn);
+	assert.equal(callbacks.length, 2);
+	stale = true;
+	await timers.find((entry) => entry.ms === 30000).fn();
+	assert.equal(s.timers.length, 0);
+	const logFile = path.join(s.home, "logs", "extension.log");
+	const stoppedLog = readFileSync(logFile, "utf8");
+	assert.equal(stoppedLog.split("\n").filter(Boolean).length, 1);
+	assert.match(stoppedLog, /stopped/);
+	assert.doesNotMatch(stoppedLog, /Error:|at /);
+	await Promise.all(callbacks.map((callback) => callback()));
+	assert.equal(readFileSync(logFile, "utf8"), stoppedLog);
+	s.cleanup();
+});
+
 test("status announces new notice keys once, sets the footer, and clears it when empty", async () => {
 	const s = setup({
 		here: { footer: "보드 내 차례 0 · 세션 차례 1", notice: "notice-1", noticeKeys: ["261004-abcd:3"] },
