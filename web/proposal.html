@@ -19,7 +19,7 @@
 		--shadow-panel:0 12px 32px rgba(16,24,40,.18);--shadow-fab:0 6px 18px var(--mark-glow);
 		--r-xs:3px;--r-sm:7px;--r-md:10px;--r-lg:14px;--r-pill:999px;
 		--s-1:4px;--s-2:8px;--s-3:10px;--s-4:12px;--s-5:14px;--s-6:18px;--s-7:20px;--s-8:24px;--s-9:32px;
-		--frame-min:150px;
+		--frame-min:150px;--fab-inset:22px;
 		--fs-xs:12px;--fs-sm:13px;--fs-md:14px;--fs-base:15px;--fs-lg:16px;--fs-xl:19px;--fs-2xl:24px;
 		--font:"Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
 		--mono:Consolas,"D2Coding",monospace;
@@ -121,7 +121,6 @@
 	.send{margin-top:var(--s-5);display:flex;gap:var(--s-4);align-items:center;flex-wrap:wrap}
 	.send button{flex:none;background:var(--ink);color:#fff;border:none;border-radius:var(--r-md);padding:var(--s-3) var(--s-6);font-size:var(--fs-base);font-weight:700;cursor:pointer}
 	.send button.approve{background:var(--rec-ink)}
-	.send button.ghost{background:var(--surface);color:var(--ink-2);border:1px solid var(--line-2)}
 	.send button:disabled{opacity:.5;cursor:default}
 	#status{color:var(--muted);font-size:var(--fs-md)}
 
@@ -149,14 +148,17 @@
 	.crops figcaption{font-size:var(--fs-sm);color:var(--ink-2);margin-top:var(--s-1);white-space:pre-wrap}
 
 	/* AI panel (prototype) */
-	#aiFab{position:fixed;right:22px;bottom:22px;z-index:20;background:var(--mark);color:#fff;border:none;border-radius:var(--r-pill);padding:var(--s-4) var(--s-6);font-size:var(--fs-base);font-weight:700;box-shadow:var(--shadow-fab);cursor:pointer}
-	#aiPanel{position:fixed;right:22px;bottom:78px;z-index:20;width:min(360px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-panel);padding:var(--s-5)}
+	#aiFab{position:fixed;right:var(--fab-inset);bottom:var(--fab-inset);z-index:20;background:var(--mark);color:#fff;border:none;border-radius:var(--r-pill);padding:var(--s-4) var(--s-6);font-size:var(--fs-base);font-weight:700;box-shadow:var(--shadow-fab);cursor:pointer}
+	#aiPanel{position:fixed;right:var(--fab-inset);bottom:78px;z-index:20;width:min(360px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-panel);padding:var(--s-5)}
 	#aiPanel h4{margin:0 0 var(--s-1);font-size:var(--fs-base)}
 	#aiPanel p{margin:0 0 var(--s-3);color:var(--muted);font-size:var(--fs-sm)}
 	#aiPanel button{display:block;width:100%;text-align:left;border:1px solid var(--line-2);background:var(--surface);border-radius:var(--r-md);padding:9px var(--s-4);margin-top:var(--s-2);font-size:var(--fs-md);cursor:pointer}
 	#aiPanel button small{display:block;color:var(--muted);font-size:var(--fs-xs)}
 	#aiMsg{margin-top:var(--s-3);font-size:var(--fs-sm);color:var(--side-ink)}
 	#aiMsg:empty{display:none}
+
+	/* Floating 멈추기: while 듣기 reads, the page scrolls card by card and the title-bar button leaves the screen; this one stays, bottom left, clear of #aiFab. */
+	#stopFab{position:fixed;left:calc(var(--fab-inset) + env(safe-area-inset-left,0px));bottom:calc(var(--fab-inset) + env(safe-area-inset-bottom,0px));z-index:20;min-height:44px;background:var(--ink);color:#fff;border:none;border-radius:var(--r-pill);padding:var(--s-4) var(--s-6);font-size:var(--fs-base);font-weight:700;box-shadow:var(--shadow-panel);cursor:pointer}
 
 	/* Full-screen frame viewer: a dialog over the page; the picture is moved by transform, marks are drawn on a canvas in screen px. */
 	body.viewer-open{overflow:hidden}
@@ -223,7 +225,6 @@
 		<div class="send" id="sendRow">
 			<button id="sendBtn" type="button">재요청</button>
 			<button id="approveBtn" type="button" class="approve">승인</button>
-			<button id="closeBtn" type="button" class="ghost">닫기</button>
 		</div>
 		<p id="status"></p>
 	</section>
@@ -233,6 +234,7 @@
 	</section>
 </main>
 <button id="aiFab" type="button">AI에게 묻기</button>
+<button id="stopFab" type="button" hidden>멈추기</button>
 <div id="aiPanel" hidden>
 	<h4>이 보드를 AI와 이야기하기</h4>
 	<p>결론은 '전체 의견'에 붙여 넣고 보내세요.</p>

@@ -8,7 +8,7 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 
 - `desk submit <boardDir>` validates a board folder, copies every referenced file into a permanent record and prints a URL.
 - The inbox (`검토함`) lists open proposals by product (git remote) and feature (branch + worktree).
-- The proposal page shows the board, lets you mark regions on frames, answer questions, comment, then ask for a revision (`재요청`), approve (`승인`) or close.
+- The proposal page shows the board, lets you mark regions on frames, answer questions, comment, then ask for a revision (`재요청`) or approve (`승인`).
 - Feedback is written to the owning session's mailbox. The senpi extension delivers it into that session as a follow-up turn.
 - Sessions answer with `desk reply`, `desk revise` or `desk close`. Every step is an event; nothing is overwritten.
 - Over Tailscale the same pages are served on `https://<machine>.<tailnet>.ts.net:4378`, so you can review from your phone.
@@ -102,9 +102,9 @@ See `skill/example/` for a working board.
 - `표시하기` arms one box: one finger or the mouse draws it (two fingers still pinch), then the button turns off again. A box made here is the same as an inline one: normalized to the picture, numbered, listed under `표시한 곳`, sent with the feedback with its crop.
 - Boxes of this frame are drawn in the viewer. Tap one to select it; a new box starts selected. The bottom of the viewer then shows its number, a comment field and `지우기`. The comment is the same one the `표시한 곳` list shows, and `지우기` removes the box everywhere. Tap outside the box to put the sheet away. When the on-screen keyboard opens, the sheet moves above it.
 - On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no `표시하기` and no sheet.
-- `재요청` sends your answers, comment and boxes and asks the session for a revised board; it needs at least one of them. `승인` sends the same and approves the proposal: the session does the work without showing it again and closes it. Only an approval is tagged in the conversation.
+- `재요청` sends your answers, comment and boxes and asks the session for a revised board; it needs at least one of them. `승인` sends the same and approves the proposal: the session does the work without showing it again and closes it. Only an approval is tagged in the conversation. Both buttons lock on the first press, so one press sends once; a successful send goes back to the inbox, a failed one stays on the page with the reason. There is no close button: the session closes the proposal with `desk close` when the work is done.
 - Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
-- `듣기` next to the title reads the open revision aloud with the device's own voice (Web Speech `speechSynthesis`, Korean). Order: the session's reply when it is the newest event; on a revised proposal, what changed (the revise note); the title; the lead; each section title, then each card's title and its `say` (else its note); each question with its options, saying which one is recommended and its `why`; then `여기까지입니다`. While it reads, the button says `멈추기`, the card being read is outlined and scrolled into view. Switching revision stops it.
+- `듣기` next to the title reads the open revision aloud with the device's own voice (Web Speech `speechSynthesis`, Korean). Order: the session's reply when it is the newest event; on a revised proposal, what changed (the revise note); the title; the lead; each section title, then each card's title and its `say` (else its note); each question with its options, saying which one is recommended and its `why`; then `여기까지입니다`. While it reads, the button says `멈추기` and a floating `멈추기` at the bottom left stays on screen as the page scrolls; the card being read is outlined and scrolled into view. Switching revision stops it.
 - To answer by voice, use the phone keyboard's microphone in `전체 의견`. One comment can answer every question.
 
 ## Data layout
@@ -149,7 +149,6 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts = unfiltered `{ mine, theirs, closed }`) |
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
 | POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
-| POST | `/api/p/<id>/dismiss` | feedback | `{ ok, status: 'closed' }` |
 | GET | `/api/push/key` | read | `{ publicKey }` (VAPID, base64url) |
 | POST | `/api/push/subscribe` | feedback | `{ ok }`, then a welcome push to that browser |
 | POST | `/api/push/unsubscribe` | feedback | `{ ok }` |
@@ -208,7 +207,7 @@ The browser gets a notification when something arrives for you, even with the in
 | `desk revise` | `수정본 <rev> · <title>` | the revise note, else `<product> · <branch>` |
 | `desk reply` | `답이 왔습니다 · <title>` | the reply text, cut to 120 chars |
 
-Your own feedback and closes never notify. The push is sent after the HTTP response and never delays it; a failed send is logged to `logs/server.log`.
+Your own feedback and `desk close` never notify. The push is sent after the HTTP response and never delays it; a failed send is logged to `logs/server.log`.
 
 Turn it on from the inbox header, once per browser: `알림 받기` asks for permission, registers `/sw.js`, subscribes through the browser's push service and POSTs the subscription to `/api/push/subscribe` (so it works from the PC page and from the tailnet page; Funnel is rejected as everywhere else). The server answers with a welcome push. `알림 켜짐` turns it off again; `알림 막힘` means the browser blocked the permission. The button is hidden where the page is not a secure context (the tailnet `https` page and `127.0.0.1` are; a plain `http://<ip>` page is not) or the browser has no push support.
 

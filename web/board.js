@@ -51,10 +51,10 @@
 		sendRow: $("sendRow"),
 		sendBtn: $("sendBtn"),
 		approveBtn: $("approveBtn"),
-		closeBtn: $("closeBtn"),
 		status: $("status"),
 		thread: $("thread"),
 		fab: $("aiFab"),
+		stopFab: $("stopFab"),
 		panel: $("aiPanel"),
 		targets: $("aiTargets"),
 		aiMsg: $("aiMsg"),
@@ -787,7 +787,7 @@
 		el.vImg.src = source.currentSrc || source.src;
 		el.viewer.hidden = false;
 		document.body.classList.add("viewer-open");
-		for (const node of [el.main, el.fab, el.panel]) node.inert = true;
+		for (const node of [el.main, el.fab, el.stopFab, el.panel]) node.inert = true;
 		vtoken += 1;
 		history.pushState({ vbViewer: vtoken }, "", location.href);
 		vLayout(true);
@@ -806,7 +806,7 @@
 		el.viewer.hidden = true;
 		el.vImg.removeAttribute("src");
 		document.body.classList.remove("viewer-open");
-		for (const node of [el.main, el.fab, el.panel]) node.inert = false;
+		for (const node of [el.main, el.fab, el.stopFab, el.panel]) node.inert = false;
 		if (vopener && vopener.isConnected && vopener !== document.body) vopener.focus({ preventScroll: true });
 		vopener = null;
 		if (!popped && history.state && history.state.vbViewer === vtoken) history.back();
@@ -1030,9 +1030,11 @@
 		if (document.visibilityState === "visible") node.scrollIntoView({ block: "center", behavior: "smooth" });
 	}
 
+	// The title-bar button turns into 멈추기, and the floating 멈추기 stays on screen while the page scrolls card by card.
 	function setListening(on) {
 		el.listenBtn.textContent = on ? "멈추기" : "듣기";
 		el.listenBtn.setAttribute("aria-pressed", String(on));
+		el.stopFab.hidden = !on;
 	}
 
 	function stopListening() {
@@ -1102,14 +1104,6 @@
 			el.questions.appendChild(node);
 		}
 		el.comment.placeholder = board.commentPlaceholder || "전체 의견";
-	}
-
-	function clearForm() {
-		state.marks = state.marks.filter((mark) => mark.rev !== state.rev);
-		el.comment.value = "";
-		for (const input of el.questions.querySelectorAll("input:checked")) input.checked = false;
-		redrawAll();
-		renderMarks();
 	}
 
 	// ---------- conversation ----------
@@ -1227,11 +1221,13 @@
 	function setBusy(busy) {
 		el.sendBtn.disabled = busy;
 		el.approveBtn.disabled = busy;
-		el.closeBtn.disabled = busy;
 	}
 
+	// Both buttons lock before the first await, so a double tap sends once. A sent proposal is the session's from here on:
+	// the page leaves for the inbox, and the session closes the proposal with `desk close` after the work.
 	async function send(verdict) {
-		if (!canMark()) return;
+		if (!canMark() || el.sendBtn.disabled) return;
+		setBusy(true);
 		const board = state.boards[state.rev] || {};
 		const answers = {};
 		for (const q of board.questions || []) {
@@ -1242,9 +1238,9 @@
 		const marks = visibleMarks().map((m, i) => ({ n: i + 1, frame: m.frame, x: m.x, y: m.y, w: m.w, h: m.h, comment: m.comment || null, crop: m.crop || null }));
 		if (verdict === "change" && !Object.keys(answers).length && !comment && !marks.length) {
 			setStatus("고른 것이나 의견이 없습니다.");
+			setBusy(false);
 			return;
 		}
-		setBusy(true);
 		setStatus("보내는 중…");
 		const headers = window.__vbSendHeaders || DEFAULT_HEADERS;
 		try {
@@ -1253,47 +1249,16 @@
 				headers,
 				body: JSON.stringify({ rev: state.rev, verdict, answers, comment: comment || null, marks }),
 			});
-			if (res.status === 409) {
-				setStatus("이미 끝난 기획안입니다.");
+			if (res.ok) {
+				location.replace("/");
 				return;
 			}
-			if (!res.ok) {
-				setStatus("보내지 못했습니다.");
-				return;
-			}
-			const result = await res.json();
-			setStatus(result.delivery === "none" ? "기록했습니다. 세션이 확인하면 답이 옵니다." : "세션에 보냈습니다.");
-			clearForm();
-			await poll();
+			setStatus(res.status === 409 ? "이미 끝난 기획안입니다." : "보내지 못했습니다.");
 		} catch (error) {
 			console.error("send", error);
 			setStatus("보내지 못했습니다.");
-		} finally {
-			setBusy(false);
 		}
-	}
-
-	async function dismiss() {
-		if (!canMark()) return;
-		if (!window.confirm("이 기획안을 닫을까요?")) return;
-		setBusy(true);
-		try {
-			const res = await fetch(`/api/p/${encodeURIComponent(id)}/dismiss`, { method: "POST", headers: DEFAULT_HEADERS, body: "{}" });
-			if (res.status === 409) {
-				setStatus("이미 끝난 기획안입니다.");
-				return;
-			}
-			if (!res.ok) {
-				setStatus("보내지 못했습니다.");
-				return;
-			}
-			await poll();
-		} catch (error) {
-			console.error("dismiss", error);
-			setStatus("보내지 못했습니다.");
-		} finally {
-			setBusy(false);
-		}
+		setBusy(false);
 	}
 
 	// ---------- AI panel ----------
@@ -1493,9 +1458,9 @@
 
 	el.sendBtn.addEventListener("click", () => send("change"));
 	el.approveBtn.addEventListener("click", () => send("approve"));
-	el.closeBtn.addEventListener("click", dismiss);
 	el.listenBtn.hidden = !("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);
 	el.listenBtn.addEventListener("click", () => (reading ? stopListening() : startListening()));
+	el.stopFab.addEventListener("click", stopListening);
 	el.revBannerBtn.addEventListener("click", () => {
 		if (state.bannerRev != null) selectRev(state.bannerRev);
 	});

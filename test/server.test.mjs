@@ -335,15 +335,17 @@ test("reply, revise and close move the status, then feedback is closed", async (
 	assert.equal((await after.json()).error, "closed");
 });
 
-test("dismiss closes a proposal from the inbox", async (t) => {
+test("dismiss is not found and leaves the proposal unchanged", async (t) => {
 	const ctx = await withServer(t);
 	const dir = makeBoard(ctx.home);
 	const { body: sub } = await submit(ctx, { srcDir: dir, session: "owner-5" });
 	const id = sub.summary.id;
-	await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "approve" });
+	const before = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
 	const res = await postJson(ctx.base, `/api/p/${id}/dismiss`, {});
-	assert.equal(res.status, 200);
-	assert.deepEqual(await res.json(), { ok: true, status: "closed" });
+	assert.equal(res.status, 404);
+	assert.deepEqual(await res.json(), { error: "not_found" });
+	const after = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
+	assert.equal(after.status, before.status);
 });
 
 test("an identical resubmit is idempotent, changed content is a duplicate", async (t) => {
@@ -854,8 +856,8 @@ test("owner feedback and closes do not notify", async (t) => {
 
 	const feedback = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "수정" }, TAILNET);
 	assert.equal(feedback.status, 200);
-	const dismiss = await postJson(ctx.base, `/api/p/${id}/dismiss`, {});
-	assert.equal(dismiss.status, 200);
+	const closed = await postJson(ctx.base, `/api/p/${id}/close`, { summary: "검토함에서 닫음", session: { id: "owner-9" } });
+	assert.equal(closed.status, 200);
 	const second = await submit(ctx, { srcDir: makeBoard(ctx.home, "other"), session: "owner-9", title: "닫기" });
 	const closing = await postJson(ctx.base, `/api/p/${second.body.summary.id}/close`, { summary: "끝", session: { id: "owner-9" } });
 	assert.equal(closing.status, 200);

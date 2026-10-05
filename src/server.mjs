@@ -428,11 +428,6 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 				if (!guard(res, access, "feedback")) return;
 				return handleFeedback(res, req, id, body, access);
 			}
-			if (action === "dismiss") {
-				if (!guard(res, access, "feedback")) return;
-				const summary = store.close(id, { summary: body.summary || "검토함에서 닫음", by: "me", session: null });
-				return sendJson(res, 200, { ok: true, status: summary.status });
-			}
 			if (action === "revise") {
 				if (!guard(res, access, "session")) return;
 				return handleRevise(res, id, body);
