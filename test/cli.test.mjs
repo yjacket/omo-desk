@@ -300,7 +300,8 @@ test("ensure against a foreign process on the configured port exits 3", async (t
 });
 
 // A stand-in for <home>/app/src/server.mjs: it reports VB_FAKE_VERSION, records a
-// /api/shutdown hit, and marks the first non-health request it serves.
+// /api/shutdown hit, and marks the first non-health request it serves. While the old
+// server still holds the port it waits for the test's "old-closed" marker, not a timer.
 const FAKE_APP_SOURCE = [
 	'import fs from "node:fs";',
 	'import http from "node:http";',
@@ -326,51 +327,53 @@ const FAKE_APP_SOURCE = [
 	"\tfs.writeFileSync(servedFile, req.url);",
 	'\tres.end(JSON.stringify({ items: [] }));',
 	"};",
-	"const start = (attempt) => {",
+	'const closedFile = path.join(home, "old-closed");',
+	"const whenOldClosed = (go) => {",
+	"\tif (fs.existsSync(closedFile)) return go();",
+	"\tconst watcher = fs.watch(home, () => { if (fs.existsSync(closedFile)) { watcher.close(); go(); } });",
+	"};",
+	"const start = (retried) => {",
 	"\tconst server = http.createServer(handler);",
-	'\tserver.on("error", () => { if (attempt < 80) setTimeout(() => start(attempt + 1), 25); });',
+	'\tserver.on("error", (error) => { if (error.code === "EADDRINUSE" && !retried) whenOldClosed(() => start(true)); });',
 	'\tserver.listen(config.port, "127.0.0.1");',
 	"};",
-	"start(0);",
+	"start(false);",
 ].join("\n");
 
-async function waitForExit(pid, timeoutMs = 5000) {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			process.kill(pid, 0);
-		} catch {
-			return;
-		}
-		if (Date.now() >= deadline) return;
-		await new Promise((resolve) => setTimeout(resolve, 25));
-	}
-}
-
-async function removeHome(tmp) {
-	for (let attempt = 0; ; attempt++) {
-		try {
-			tmp.cleanup();
-			return;
-		} catch (error) {
-			if (attempt >= 40) throw error;
-			await new Promise((resolve) => setTimeout(resolve, 50));
-		}
-	}
+// Resolves when the process is gone: Wait-Process returns on the exit itself, so nothing here polls.
+function waitForExit(pid) {
+	return new Promise((resolve) => {
+		const waiter = spawn("powershell", ["-NoProfile", "-Command", `Wait-Process -Id ${pid} -ErrorAction SilentlyContinue`], {
+			stdio: "ignore",
+			windowsHide: true,
+		});
+		waiter.on("exit", resolve);
+		waiter.on("error", resolve);
+	});
 }
 
 async function ensureCtx(t, appVersion = null) {
 	const tmp = makeTmpHome("vb-cli-ensure-");
+	let shuttingDown = false;
+	let oldClosing = false;
 	const old = http.createServer((req, res) => {
 		res.setHeader("content-type", "application/json");
 		if (req.url === "/api/shutdown") {
 			fs.appendFileSync(path.join(tmp.home, "old-shutdowns"), "x");
+			shuttingDown = true;
 			res.end("{}");
-			setTimeout(() => old.close(), 150);
 			return;
 		}
 		if (req.url === "/api/health") {
-			res.end(JSON.stringify({ ok: true, name: "omo-visual-board", version: "0.0.0-installed" }));
+			// A real server keeps answering for a moment after /api/shutdown. Answer one more
+			// health check after it, then close: that is the window ensure must not mistake for success.
+			const closeAfter = shuttingDown;
+			res.end(JSON.stringify({ ok: true, name: "omo-visual-board", version: "0.0.0-installed" }), () => {
+				if (!closeAfter || oldClosing) return;
+				oldClosing = true;
+				old.close(() => fs.writeFileSync(path.join(tmp.home, "old-closed"), ""));
+				old.closeAllConnections();
+			});
 			return;
 		}
 		fs.appendFileSync(path.join(tmp.home, "old-served"), req.url);
@@ -393,15 +396,24 @@ async function ensureCtx(t, appVersion = null) {
 	}
 	const repo = makeGitRepo(tmp.home);
 	t.after(async () => {
-		await new Promise((resolve) => old.close(resolve));
-		try {
-			const pid = Number(fs.readFileSync(path.join(tmp.home, "fake.pid"), "utf8"));
-			process.kill(pid);
-			await waitForExit(pid);
-		} catch {
-			// the fake app server never started
+		if (!oldClosing) {
+			oldClosing = true;
+			const closed = new Promise((resolve) => old.close(resolve));
+			old.closeAllConnections();
+			await closed;
 		}
-		await removeHome(tmp);
+		const pidFile = path.join(tmp.home, "fake.pid");
+		if (fs.existsSync(pidFile)) {
+			const pid = Number(fs.readFileSync(pidFile, "utf8"));
+			const exited = waitForExit(pid);
+			try {
+				process.kill(pid);
+			} catch {
+				// already gone
+			}
+			await exited;
+		}
+		tmp.cleanup();
 	});
 	return { home: tmp.home, base: `http://127.0.0.1:${port}`, repo };
 }
