@@ -97,10 +97,11 @@ See `skill/example/` for a working board.
 
 - Inline frames: a mouse or pen drag on a frame draws a numbered box right there. Touch never draws inline, so a finger over a frame scrolls the page.
 - Tap or click a frame without dragging (under 8 px of movement) and the frame opens full screen in the viewer. It works for pictures and for rendered `.mmd` diagrams.
-- The viewer is a dialog over the page with a top bar: the frame label, a `네모 그리기` toggle and `닫기`. The picture starts fitted to the screen. Two fingers pinch-zoom (1x to 8x) around the midpoint, one finger or a mouse drag pans, the mouse wheel zooms around the cursor. The picture can't be dragged off the screen.
-- With `네모 그리기` on, one finger or the mouse draws a box (two fingers still pinch). A box made here is the same as an inline one: normalized to the picture, numbered, listed under `표시한 곳`, sent with the feedback with its crop.
-- Boxes of this frame are drawn in the viewer. Tap one to select it; a `지우기` button appears next to it and removes it everywhere, including the `표시한 곳` list. No scrolling to the bottom.
-- On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no draw toggle and no delete.
+- The viewer is a dialog over the page with a top bar: the frame label, `표시하기` and `닫기`. The picture starts fitted to the screen. Two fingers pinch-zoom (1x to 8x) around the midpoint, one finger or a mouse drag pans, the mouse wheel zooms around the cursor. The picture can't be dragged off the screen.
+- `표시하기` arms one box: one finger or the mouse draws it (two fingers still pinch), then the button turns off again. A box made here is the same as an inline one: normalized to the picture, numbered, listed under `표시한 곳`, sent with the feedback with its crop.
+- Boxes of this frame are drawn in the viewer. Tap one to select it; a new box starts selected. The bottom of the viewer then shows its number, a comment field and `지우기`. The comment is the same one the `표시한 곳` list shows, and `지우기` removes the box everywhere. Tap outside the box to put the sheet away. When the on-screen keyboard opens, the sheet moves above it.
+- On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no `표시하기` and no sheet.
+- `의견 보내기` sends your answers, comment and boxes and hands the turn to the session; it needs at least one of them. `이대로 진행` sends the same and approves the proposal: the session does the work and closes it. Only an approval is tagged in the conversation.
 - Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
 
 ## Data layout
@@ -238,6 +239,6 @@ Tests use temp homes, port 0, fake runners for `reg`, `tailscale` and `wscript`,
 - Windows only for install, autostart and launching.
 - Proposals submitted before a repo gets a remote keep the `local/<name>` product key.
 - The phone tap inside the Orca mobile app is not machine-verified.
-- Viewer pinch and pan are checked with emulated touch in Chromium, not on a real phone.
+- Viewer pinch and pan are checked with emulated touch in Chromium, not on a real phone. The comment sheet staying above the on-screen keyboard is not machine-checked.
 - Single user: the tailnet owner check assumes one login.
 - `/api/open` URLs are capped at 30000 chars (Windows command-line limit); longer content is copied instead.

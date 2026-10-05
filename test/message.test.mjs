@@ -73,7 +73,7 @@ test("change verdict maps answers to question text and option labels, marks carr
 		text,
 		[
 			"[visual-board] 의견이 왔습니다: 로그인 개편 (240101-abcd, 2안, #9)",
-			"판단: 고쳐 주세요",
+			"판단: 의견 (승인 전)",
 			"답: 레이아웃은? -> 상단 메뉴; 테마는? -> 다크",
 			"전체 의견: 상단 메뉴로 바꿔주세요",
 			`표시 1 (메인): 버튼이 작아요 | 그림: ${CROPS}/crops/000009-1.png`,

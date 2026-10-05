@@ -20,7 +20,6 @@
 	const DEFAULT_HEADERS = { "content-type": "application/json", "x-vb": "1" };
 	const EVENT_LABELS = { submitted: "제출", feedback: "내 의견", reply: "세션 답", revised: "고친 안", closed: "끝남" };
 	const STATUS_LABELS = { mine: "내 차례", theirs: "세션 차례", closed: "끝남" };
-	const VERDICT_TEXT = { approve: "이대로 진행", change: "고쳐 주세요" };
 	const PROMPT_HEAD = [
 		"나는 개발자다. 코딩 에이전트가 보여 준 검토 보드를 보고 있고, 잘 모르는 부분을 물어보고 결정하려 한다.",
 		"먼저 각 질문의 선택지 차이를 쉽게 설명하고 추천과 이유를 말해 줘. 내가 정하면 보드에 붙일 결론을 3줄 이내로 정리해 줘.",
@@ -67,11 +66,15 @@
 		vStage: $("vStage"),
 		vImg: $("vImg"),
 		vCanvas: $("vCanvas"),
+		vSheet: $("vSheet"),
+		vNum: $("vNum"),
+		vNote: $("vNote"),
 		vDel: $("vDel"),
 	};
 	const theme = getComputedStyle(document.documentElement);
 	const MARK_COLOR = theme.getPropertyValue("--mark").trim() || "#1463ff";
 	const MARK_FILL = theme.getPropertyValue("--mark-fill").trim() || "rgba(20,99,255,0.10)";
+	const MARK_TINT = theme.getPropertyValue("--mark-tint").trim() || "rgba(20,99,255,0.12)";
 	const MIN_DIAGRAM_PX = Number.parseFloat(theme.getPropertyValue("--frame-min")) || 150;
 
 	const idMatch = location.pathname.match(/^\/p\/([^/]+)/);
@@ -608,10 +611,12 @@
 			const picture = mark.crop ? `<img alt="표시 ${i + 1}" src="${mark.crop}">` : '<div class="nocrop"></div>';
 			item.innerHTML =
 				`${picture}<div><b><span class="num">${i + 1}</span>${esc(mark.frame)}</b>` +
-				'<textarea placeholder="여기를 어떻게 바꾸면 좋을까요?"></textarea></div>' +
+				'<textarea placeholder="의견"></textarea></div>' +
 				'<button class="del" type="button">지우기</button>';
 			const textarea = item.querySelector("textarea");
 			textarea.value = mark.comment;
+			// the viewer's comment field writes through to this one
+			mark.listNote = textarea;
 			textarea.addEventListener("input", () => {
 				mark.comment = textarea.value;
 			});
@@ -639,6 +644,8 @@
 	let vtap = null;
 	let vopener = null;
 	let vtoken = 0;
+	// The mark whose comment the sheet's field holds.
+	let vnoted = null;
 
 	function vNatural() {
 		const rect = vsource.getBoundingClientRect();
@@ -706,21 +713,27 @@
 		return { x: vv.tx + mark.x * w, y: vv.ty + mark.y * h, w: mark.w * w, h: mark.h * h };
 	}
 
-	// 지우기 sits just below the selected box, above it when there is no room, inside its top edge as a last resort.
-	function vPlaceDelete() {
-		const mark = vv.selected;
-		el.vDel.hidden = !mark || !canMark();
-		if (el.vDel.hidden) return;
-		const r = vRect(mark);
-		const w = el.vDel.offsetWidth;
-		const h = el.vDel.offsetHeight;
-		const gap = 8;
-		let y = r.y + r.h + gap;
-		if (y + h > vsize.h) y = r.y - h - gap;
-		if (y < 0) y = Math.max(0, Math.min(r.y + gap, vsize.h - h));
-		const x = Math.max(0, Math.min(r.x + r.w - w, vsize.w - w));
-		el.vDel.style.left = `${x}px`;
-		el.vDel.style.top = `${y}px`;
+	// The selected box's number, comment and 지우기 sit in a sheet at the bottom of the viewer.
+	function vSyncSheet() {
+		const entry = vv.selected && canMark() ? vFrameMarks().find((item) => item.mark === vv.selected) : null;
+		el.vSheet.hidden = !entry;
+		if (!entry) {
+			vnoted = null;
+			if (document.activeElement === el.vNote) el.viewer.focus({ preventScroll: true });
+			return;
+		}
+		el.vNum.textContent = String(entry.n);
+		if (vnoted !== entry.mark) {
+			vnoted = entry.mark;
+			el.vNote.value = entry.mark.comment;
+		}
+	}
+
+	// The on-screen keyboard shrinks the visual viewport, not the layout one: lift the sheet by the height it covers.
+	function vLift() {
+		const v = window.visualViewport;
+		const covered = v && Math.abs(v.scale - 1) < 0.01 ? window.innerHeight - v.height - v.offsetTop : 0;
+		el.vSheet.style.bottom = `${Math.max(0, covered)}px`;
 	}
 
 	function vRender() {
@@ -734,8 +747,7 @@
 		for (const { mark, n } of entries) {
 			const r = vRect(mark);
 			if (mark === vv.selected) {
-				vctx.fillStyle = MARK_FILL;
-				vctx.fillRect(r.x, r.y, r.w, r.h);
+				vctx.fillStyle = MARK_TINT;
 				vctx.fillRect(r.x, r.y, r.w, r.h);
 			}
 			drawMark(vctx, r.x, r.y, r.w, r.h, n);
@@ -744,7 +756,7 @@
 			const b = vBox(vgesture.start, vgesture.cur);
 			drawMark(vctx, b.x, b.y, b.w, b.h, 0);
 		}
-		vPlaceDelete();
+		vSyncSheet();
 	}
 
 	// Called from updateMode: the draw toggle and delete exist only while the proposal accepts marks.
@@ -816,7 +828,7 @@
 	// A finished drag becomes a mark exactly like an inline one: normalized to the picture, then the same list and mode updates.
 	function vFinishDraw(a, b) {
 		const box = vBox(a, b);
-		if (box.w < MIN_MARK_PX || box.h < MIN_MARK_PX) return;
+		if (box.w < MIN_MARK_PX || box.h < MIN_MARK_PX) return null;
 		const w = vpicture.w * vv.scale;
 		const h = vpicture.h * vv.scale;
 		const mark = {
@@ -830,11 +842,13 @@
 			img: vsource,
 		};
 		state.marks.push(mark);
-		// selected, so a slip of the finger can be undone on the spot
+		// one 표시하기 press draws one box; the new box is selected so its comment can be written right away
+		vv.drawing = false;
 		vv.selected = mark;
 		redrawAll();
 		renderMarks();
 		updateMode();
+		return mark;
 	}
 
 	function vPinchFrom() {
@@ -854,9 +868,11 @@
 		vtap = null;
 		// one finger left after a pinch pans; it never starts a box mid-gesture
 		vgesture = vpoints.size ? { type: "pan", last: [...vpoints.values()][0] } : null;
+		const made = !tap && drawing ? vFinishDraw(drawing.start, p) : null;
 		if (tap) vSelectAt(p);
-		else if (drawing) vFinishDraw(drawing.start, p);
 		vRender();
+		// with a mouse the keyboard is already there; on a phone the field waits for a tap instead of raising the keyboard
+		if (made && e.pointerType === "mouse") el.vNote.focus({ preventScroll: true });
 	}
 
 	function vZoomAt(x, y, scale, px, py) {
@@ -921,8 +937,16 @@
 		syncViewer();
 	});
 	el.vClose.addEventListener("click", () => closeViewer());
-	// the button lives inside the stage: keep its touches away from the pan and draw handlers
-	el.vDel.addEventListener("pointerdown", (e) => e.stopPropagation());
+	el.vNote.addEventListener("input", () => {
+		const mark = vv.selected;
+		if (!mark) return;
+		mark.comment = el.vNote.value;
+		if (mark.listNote) mark.listNote.value = mark.comment;
+	});
+	if (window.visualViewport) {
+		window.visualViewport.addEventListener("resize", vLift);
+		window.visualViewport.addEventListener("scroll", vLift);
+	}
 	el.vDel.addEventListener("click", () => {
 		const mark = vv.selected;
 		vv.selected = null;
@@ -988,7 +1012,7 @@
 			extra = `<span class="tag">${ev.rev}안</span>`;
 			body = ev.note ? esc(ev.note) : "";
 		} else if (ev.type === "feedback") {
-			extra = `<span class="tag">${ev.rev}안</span><span class="verdict ${esc(ev.verdict)}">${esc(VERDICT_TEXT[ev.verdict] || ev.verdict)}</span>`;
+			extra = `<span class="tag">${ev.rev}안</span>${ev.verdict === "approve" ? '<span class="verdict approve">이대로 진행</span>' : ""}`;
 			const answers = answerLines(ev);
 			if (answers.length) body += `<ul>${answers.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`;
 			if (ev.comment) body += esc(ev.comment);

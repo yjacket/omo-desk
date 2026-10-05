@@ -58,7 +58,6 @@
 	.legend{display:flex;flex-wrap:wrap;gap:var(--s-3);margin:var(--s-5) 0 var(--s-1)}
 	.legend span{display:inline-flex;align-items:center;gap:var(--s-2);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:var(--s-1) var(--s-4);font-size:var(--fs-sm)}
 	.sw-edit{width:22px;height:14px;border:2px solid var(--edit);border-radius:var(--r-xs)}
-	.sw-mark{width:22px;height:14px;border:3px dashed var(--mark);outline:2px solid #fff;background:var(--mark-tint);border-radius:2px}
 
 	/* Board sections, cards and frames (prototype) */
 	section.group{margin-top:26px}
@@ -168,7 +167,12 @@
 	.vstage img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;background:#111;pointer-events:none;-webkit-user-drag:none}
 	.viewer.light .vstage img{background:var(--surface)}
 	.vstage canvas{position:absolute;left:0;top:0;pointer-events:none}
-	.vdel{position:absolute;z-index:2;min-width:72px;min-height:44px;padding:0 var(--s-5);border:none;border-radius:var(--r-md);background:var(--edit);color:#fff;font-size:var(--fs-md);font-weight:700;cursor:pointer;box-shadow:var(--shadow-panel)}
+	/* The selected box's sheet: number, comment, 지우기. board.js lifts it above the on-screen keyboard through visualViewport. */
+	.vsheet{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:flex-start;gap:var(--s-3);padding:var(--s-3) max(var(--s-4),env(safe-area-inset-right)) max(var(--s-3),env(safe-area-inset-bottom)) max(var(--s-4),env(safe-area-inset-left));background:#0b0d12;border-top:1px solid rgba(255,255,255,.12)}
+	.vsheet .num{flex:none;width:28px;height:28px;margin:8px 0 0;font-size:var(--fs-md)}
+	.vsheet textarea{flex:1;min-width:0;min-height:44px;max-height:30vh;field-sizing:content;resize:none;font-size:16px;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22);color:#fff}
+	.vsheet textarea::placeholder{color:rgba(255,255,255,.5)}
+	.vsheet button{flex:none;min-height:44px;padding:0 var(--s-5);border:none;border-radius:var(--r-md);background:rgba(255,255,255,.14);color:#fff;font-size:var(--fs-md);font-weight:700;cursor:pointer}
 
 	/* Mermaid renders here first so getBBox() has real layout; the result is serialized into an <img>. */
 	#mmdStage{position:absolute;left:-200000px;top:0;width:1600px;visibility:hidden;pointer-events:none}
@@ -199,8 +203,7 @@
 	<div class="banner done" id="closedBanner" hidden></div>
 	<div class="banner old" id="oldNote" hidden>지난 안입니다. 보기만 할 수 있습니다.</div>
 	<div class="legend">
-		<span><i class="sw-edit"></i>빨간 실선: 시안에서 바뀐 곳</span>
-		<span><i class="sw-mark"></i>파란 점선 네모 + 번호: 내가 표시한 곳</span>
+		<span><i class="sw-edit"></i>빨간 실선: 바뀐 곳</span>
 	</div>
 	<div id="sections"></div>
 	<section class="card" id="marksCard">
@@ -234,13 +237,17 @@
 <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="그림 보기" tabindex="-1" hidden>
 	<div class="vbar">
 		<span class="vlabel" id="vLabel"></span>
-		<button type="button" id="vDraw" aria-pressed="false">네모 그리기</button>
+		<button type="button" id="vDraw" aria-pressed="false">표시하기</button>
 		<button type="button" id="vClose">닫기</button>
 	</div>
 	<div class="vstage" id="vStage">
 		<img id="vImg" alt="">
 		<canvas id="vCanvas"></canvas>
-		<button type="button" class="vdel" id="vDel" hidden>지우기</button>
+	</div>
+	<div class="vsheet" id="vSheet" hidden>
+		<span class="num" id="vNum"></span>
+		<textarea id="vNote" placeholder="의견" aria-label="의견"></textarea>
+		<button type="button" id="vDel">지우기</button>
 	</div>
 </div>
 <div id="mmdStage" aria-hidden="true"></div>
