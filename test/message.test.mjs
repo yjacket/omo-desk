@@ -43,7 +43,7 @@ test("approve verdict renders header, 판단, 보기 and 처리 with the current
 		text,
 		[
 			"[visual-board] 의견이 왔습니다: 로그인 개편 (240101-abcd, 3안, #4)",
-			"판단: 이대로 진행",
+			"판단: 승인",
 			`보기: ${URL}`,
 			`처리: ${CLI} show 240101-abcd 로 전체를 읽고 ${CLI} reply / revise / close 로 답하세요.`,
 		].join("\n"),
@@ -73,7 +73,7 @@ test("change verdict maps answers to question text and option labels, marks carr
 		text,
 		[
 			"[visual-board] 의견이 왔습니다: 로그인 개편 (240101-abcd, 2안, #9)",
-			"판단: 의견 (승인 전)",
+			"판단: 재요청",
 			"답: 레이아웃은? -> 상단 메뉴; 테마는? -> 다크",
 			"전체 의견: 상단 메뉴로 바꿔주세요",
 			`표시 1 (메인): 버튼이 작아요 | 그림: ${CROPS}/crops/000009-1.png`,

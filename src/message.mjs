@@ -14,7 +14,7 @@ const answerLine = (board, answers) => {
 export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 	const lines = [
 		`[visual-board] 의견이 왔습니다: ${summary.title} (${summary.id}, ${event.rev}안, #${event.seq})`,
-		`판단: ${event.verdict === "approve" ? "이대로 진행" : "의견 (승인 전)"}`,
+		`판단: ${event.verdict === "approve" ? "승인" : "재요청"}`,
 	];
 	const answers = answerLine(board, event.answers);
 	if (answers) lines.push(`답: ${answers}`);

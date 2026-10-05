@@ -71,5 +71,5 @@ It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as 
 - The extension delivers the user's feedback to you as a message. Read it in full with `vb show <id>`.
 - Answer a comment: `vb reply <id> <text>`.
 - Change the board: edit the folder, then `vb revise <id> .omo/boards/<slug> --note "<what changed>"`.
-- Once the user chose 이대로 진행 and the work is done: `vb close <id> <summary>`. Copy the printed `record:` line into your report.
+- Once the user chose 승인 and the work is done: `vb close <id> <summary>`. Copy the printed `record:` line into your report.
 - Not running under senpi? Start `vb wait <id>` in the background. It prints `FEEDBACK <id> <seq>` with the message when the user answers, or `CLOSED <id>`.

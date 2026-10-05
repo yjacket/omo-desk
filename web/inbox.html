@@ -513,7 +513,7 @@
 
 			function rowOf(item) {
 				const chips = [h("span", { class: "chip chip-" + item.status }, CHIP[item.status] || item.status)];
-				if (item.status === "theirs" && item.approved) chips.push(h("span", { class: "chip chip-ok" }, "진행 승인"));
+				if (item.status === "theirs" && item.approved) chips.push(h("span", { class: "chip chip-ok" }, "승인"));
 				return h(
 					"a",
 					{ class: "row", href: "/p/" + encodeURIComponent(item.id), "data-id": item.id },

@@ -8,7 +8,7 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 
 - `vb submit <boardDir>` validates a board folder, copies every referenced file into a permanent record and prints a URL.
 - The inbox (`검토함`) lists open proposals by product (git remote) and feature (branch + worktree).
-- The proposal page shows the board, lets you mark regions on frames, answer questions, comment, approve (`이대로 진행`) or close.
+- The proposal page shows the board, lets you mark regions on frames, answer questions, comment, then ask for a revision (`재요청`), approve (`승인`) or close.
 - Feedback is written to the owning session's mailbox. The senpi extension delivers it into that session as a follow-up turn.
 - Sessions answer with `vb reply`, `vb revise` or `vb close`. Every step is an event; nothing is overwritten.
 - Over Tailscale the same pages are served on `https://<machine>.<tailnet>.ts.net:4378`, so you can review from your phone.
@@ -101,7 +101,7 @@ See `skill/example/` for a working board.
 - `표시하기` arms one box: one finger or the mouse draws it (two fingers still pinch), then the button turns off again. A box made here is the same as an inline one: normalized to the picture, numbered, listed under `표시한 곳`, sent with the feedback with its crop.
 - Boxes of this frame are drawn in the viewer. Tap one to select it; a new box starts selected. The bottom of the viewer then shows its number, a comment field and `지우기`. The comment is the same one the `표시한 곳` list shows, and `지우기` removes the box everywhere. Tap outside the box to put the sheet away. When the on-screen keyboard opens, the sheet moves above it.
 - On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no `표시하기` and no sheet.
-- `의견 보내기` sends your answers, comment and boxes and hands the turn to the session; it needs at least one of them. `이대로 진행` sends the same and approves the proposal: the session does the work and closes it. Only an approval is tagged in the conversation.
+- `재요청` sends your answers, comment and boxes and asks the session for a revised board; it needs at least one of them. `승인` sends the same and approves the proposal: the session does the work without showing it again and closes it. Only an approval is tagged in the conversation.
 - Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
 
 ## Data layout

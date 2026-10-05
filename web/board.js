@@ -204,7 +204,7 @@
 		const started = sessionStart();
 		if (started) chips.push(`<span class="chip">세션 ${esc(started)} 시작</span>`);
 		chips.push(`<span class="chip status ${esc(s.status)}">${esc(STATUS_LABELS[s.status] || s.status)}</span>`);
-		if (s.status === "theirs" && s.approved) chips.push('<span class="chip ok">진행 승인</span>');
+		if (s.status === "theirs" && s.approved) chips.push('<span class="chip ok">승인</span>');
 		el.chips.innerHTML = chips.join("");
 	}
 
@@ -1012,7 +1012,7 @@
 			extra = `<span class="tag">${ev.rev}안</span>`;
 			body = ev.note ? esc(ev.note) : "";
 		} else if (ev.type === "feedback") {
-			extra = `<span class="tag">${ev.rev}안</span>${ev.verdict === "approve" ? '<span class="verdict approve">이대로 진행</span>' : ""}`;
+			extra = `<span class="tag">${ev.rev}안</span>${ev.verdict === "approve" ? '<span class="verdict approve">승인</span>' : ""}`;
 			const answers = answerLines(ev);
 			if (answers.length) body += `<ul>${answers.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`;
 			if (ev.comment) body += esc(ev.comment);
