@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { homeDir, layout } from "./paths.mjs";
+import { homeDir } from "./paths.mjs";
 
 export const SERVER_NODE_ARGS = ["--max-semi-space-size=1", "--max-old-space-size=128"];
 
@@ -14,9 +14,9 @@ export const WMI_CREATE_SCRIPT =
 
 // A detached child's 'error' (e.g. ENOENT) has no other listener, so it is swallowed here to keep
 // the launch contract promise-shaped. Leave a breadcrumb so the failure is not invisible.
-function logLaunchError(env, error) {
+function logLaunchError(error, home) {
 	try {
-		const logs = layout(env).logs;
+		const logs = path.join(home, "logs");
 		fs.mkdirSync(logs, { recursive: true });
 		fs.appendFileSync(path.join(logs, "launch.log"), `${new Date().toISOString()} ${error?.stack ?? error?.message ?? String(error)}\n`);
 	} catch {
@@ -41,12 +41,12 @@ function findNode(env, platform) {
 	throw new Error("Node executable not found on PATH for the omo-desk server");
 }
 
-export function launchServer({ env = process.env, script = path.join(homeDir(env), "app", "src", "server.mjs"), execPath = process.execPath, platform = process.platform, spawnImpl = spawn } = {}) {
+export function launchServer({ env = process.env, script = path.join(homeDir(env), "app", "src", "server.mjs"), execPath = process.execPath, platform = process.platform, spawnImpl = spawn, home = homeDir(env) } = {}) {
 	const args = [...SERVER_NODE_ARGS, script];
 	const resolveNode = () => (isNodeExe(execPath) ? execPath : findNode(env, platform));
 	const spawnChild = (node, wmiError) => {
-		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: homeDir(env), env });
-		child.on?.("error", (error) => logLaunchError(env, error));
+		const child = spawnImpl(node, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
+		child.on?.("error", (error) => logLaunchError(error, home));
 		child.unref?.();
 		return { via: "spawn", pid: child.pid, ...(wmiError ? { wmiError } : {}) };
 	};
@@ -77,7 +77,7 @@ export function launchServer({ env = process.env, script = path.join(homeDir(env
 			ps = spawnImpl("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WMI_CREATE_SCRIPT], {
 				stdio: ["ignore", "pipe", "ignore"],
 				windowsHide: true,
-				env: { ...env, DESK_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), DESK_LAUNCH_CWD: homeDir(env) },
+				env: { ...env, DESK_LAUNCH_CMD: [node, ...args].map(quoteArg).join(" "), DESK_LAUNCH_CWD: home },
 			});
 		} catch (error) {
 			finish(spawnChild(node, `spawn: ${error.message}`));
