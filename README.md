@@ -104,6 +104,8 @@ See `skill/example/` for a working board.
     events/<seq6>-<type>.json
     crops/<seq6>-<n>.png
   inbox/<session>/<id>-<seq6>.json   mailbox outside the record; the extension deletes after delivery
+  push/vapid.json      the server's VAPID key pair, created once
+  push/subscriptions.json   browsers that turned notifications on
   logs/  config.json  server.json  launch-hidden.vbs
 ```
 
@@ -126,6 +128,7 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | GET | `/` | read | inbox page |
 | GET | `/p/<id>` | read | proposal page |
 | GET | `/web/<file>` | read | static file |
+| GET | `/sw.js` | read | the service worker (`Service-Worker-Allowed: /`, `cache-control: no-cache`) |
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | file; traversal -> 403 |
 | GET | `/api/health` | read | `{ ok, name: 'omo-visual-board', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
@@ -133,6 +136,9 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
 | POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
 | POST | `/api/p/<id>/dismiss` | feedback | `{ ok, status: 'closed' }` |
+| GET | `/api/push/key` | read | `{ publicKey }` (VAPID, base64url) |
+| POST | `/api/push/subscribe` | feedback | `{ ok }`, then a welcome push to that browser |
+| POST | `/api/push/unsubscribe` | feedback | `{ ok }` |
 | POST | `/api/open` | open | `{ ok, cmd }` |
 | POST | `/api/proposals` | session | `{ summary, url, existing }` |
 | POST | `/api/p/<id>/revise` | session | `{ summary, url }` |
@@ -176,6 +182,30 @@ The senpi extension (`extension/visual-board.ts`) does nothing in child or task-
 - On shutdown it calls `/api/bye` so the owner counts as gone at once.
 
 Session ids come from `VB_SESSION` or `PI_SESSION_ID`.
+
+## Notifications
+
+The browser gets a notification when something arrives for you, even with the inbox closed. Tapping it opens that proposal (`/p/<id>`).
+
+| Trigger | Title | Body |
+| --- | --- | --- |
+| New proposal (not an `existing` resubmit) | `새 기획안 · <title>` | `<product> · <branch>` |
+| `vb revise` | `수정본 <rev> · <title>` | the revise note, else `<product> · <branch>` |
+| `vb reply` | `답이 왔습니다 · <title>` | the reply text, cut to 120 chars |
+
+Your own feedback and closes never notify. The push is sent after the HTTP response and never delays it; a failed send is logged to `logs/server.log`.
+
+Turn it on from the inbox header, once per browser: `알림 받기` asks for permission, registers `/sw.js`, subscribes through the browser's push service and POSTs the subscription to `/api/push/subscribe` (so it works from the PC page and from the tailnet page; Funnel is rejected as everywhere else). The server answers with a welcome push. `알림 켜짐` turns it off again; `알림 막힘` means the browser blocked the permission. The button is hidden where the page is not a secure context (the tailnet `https` page and `127.0.0.1` are; a plain `http://<ip>` page is not) or the browser has no push support.
+
+Stored in `<home>/push/`: `vapid.json` (the server's P-256 key pair, created on first use, written through a temp file and a rename) and `subscriptions.json` (one entry per endpoint: `endpoint`, `keys`, `created`, `ua`, `via`). Both are secrets; they stay on this PC. A send is a POST to the subscription's endpoint with `TTL: 86400`, `Urgency: high`, a VAPID `Authorization` header (ES256 JWT, 12 h) and an RFC 8291 `aes128gcm` body. 201/202 is delivered; 404/410 removes the subscription; anything else is logged and the subscription is kept.
+
+Limits:
+
+- The payload (title, body, `/p/<id>`) is end-to-end encrypted to the browser, so the push service (Google, Mozilla, Apple) only sees that something was sent.
+- The PC must be on and the server running; nothing is queued for a server that is down.
+- Android (Samsung Internet): it arrives with the tab and the browser closed, unless the browser app was force-stopped or is battery-restricted.
+- PC: the browser program must be running (a background process is enough; the tab can be closed).
+- Each browser and each origin (`http://127.0.0.1:4377` on the PC, the tailnet `https` origin on the phone) subscribes separately.
 
 ## Tailnet
 

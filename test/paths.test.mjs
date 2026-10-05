@@ -21,13 +21,14 @@ test("layout puts every path under the resolved home", () => {
 	const tmp = makeTmpHome();
 	try {
 		const l = layout({ OMO_VISUAL_BOARD_HOME: tmp.home });
-		assert.deepEqual(Object.keys(l).sort(), ["app", "config", "data", "home", "inbox", "launcher", "logs", "proposals", "serverJson"].sort());
+		assert.deepEqual(Object.keys(l).sort(), ["app", "config", "data", "home", "inbox", "launcher", "logs", "proposals", "push", "serverJson"].sort());
 		assert.equal(l.home, tmp.home);
 		assert.equal(l.app, path.join(tmp.home, "app"));
 		assert.equal(l.data, path.join(tmp.home, "data"));
 		assert.equal(l.proposals, path.join(tmp.home, "data", "proposals"));
 		assert.equal(l.inbox, path.join(tmp.home, "inbox"));
 		assert.equal(l.logs, path.join(tmp.home, "logs"));
+		assert.equal(l.push, path.join(tmp.home, "push"));
 		assert.equal(l.config, path.join(tmp.home, "config.json"));
 		assert.equal(l.serverJson, path.join(tmp.home, "server.json"));
 		assert.equal(l.launcher, path.join(tmp.home, "launch-hidden.vbs"));

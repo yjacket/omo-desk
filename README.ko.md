@@ -104,6 +104,8 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
     events/<seq6>-<type>.json
     crops/<seq6>-<n>.png
   inbox/<session>/<id>-<seq6>.json   기록 밖의 우편함. 전달 후 확장이 지움
+  push/vapid.json      서버의 VAPID 키 쌍. 한 번만 만듦
+  push/subscriptions.json   알림을 켠 브라우저들
   logs/  config.json  server.json  launch-hidden.vbs
 ```
 
@@ -126,6 +128,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | GET | `/` | read | 검토함 페이지 |
 | GET | `/p/<id>` | read | 기획안 페이지 |
 | GET | `/web/<file>` | read | 정적 파일 |
+| GET | `/sw.js` | read | 서비스 워커(`Service-Worker-Allowed: /`, `cache-control: no-cache`) |
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | 파일. 경로 탈출은 403 |
 | GET | `/api/health` | read | `{ ok, name: 'omo-visual-board', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
@@ -133,6 +136,9 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
 | POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
 | POST | `/api/p/<id>/dismiss` | feedback | `{ ok, status: 'closed' }` |
+| GET | `/api/push/key` | read | `{ publicKey }` (VAPID, base64url) |
+| POST | `/api/push/subscribe` | feedback | `{ ok }`, 이어서 그 브라우저에 환영 푸시 |
+| POST | `/api/push/unsubscribe` | feedback | `{ ok }` |
 | POST | `/api/open` | open | `{ ok, cmd }` |
 | POST | `/api/proposals` | session | `{ summary, url, existing }` |
 | POST | `/api/p/<id>/revise` | session | `{ summary, url }` |
@@ -176,6 +182,30 @@ senpi 확장(`extension/visual-board.ts`)은 하위 세션이나 task member 세
 - 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
 
 세션 id는 `VB_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다.
+
+## 알림
+
+나에게 뭔가 오면 검토함이 닫혀 있어도 브라우저에 알림이 뜹니다. 알림을 누르면 그 기획안(`/p/<id>`)이 열립니다.
+
+| 계기 | 제목 | 본문 |
+| --- | --- | --- |
+| 새 기획안(`existing` 재제출은 제외) | `새 기획안 · <title>` | `<제품> · <브랜치>` |
+| `vb revise` | `수정본 <rev> · <title>` | 수정 메모, 없으면 `<제품> · <브랜치>` |
+| `vb reply` | `답이 왔습니다 · <title>` | 답 문구를 120자까지 |
+
+내가 보낸 의견과 닫기는 알리지 않습니다. 푸시는 HTTP 응답을 보낸 뒤에 보내므로 응답을 늦추지 않고, 보내기에 실패하면 `logs/server.log` 에 남깁니다.
+
+검토함 머리글에서 브라우저마다 한 번 켭니다. `알림 받기` 는 권한을 묻고, `/sw.js` 를 등록하고, 브라우저의 푸시 서비스로 구독한 뒤 구독 정보를 `/api/push/subscribe` 로 보냅니다(PC 페이지와 tailnet 페이지 모두 가능. Funnel은 다른 곳과 마찬가지로 거부). 서버는 환영 푸시로 답합니다. `알림 켜짐` 을 누르면 다시 꺼지고, `알림 막힘` 은 브라우저가 권한을 막았다는 뜻입니다. 페이지가 보안 컨텍스트가 아니거나(tailnet `https` 페이지와 `127.0.0.1` 은 맞고, 평범한 `http://<ip>` 페이지는 아님) 브라우저가 푸시를 지원하지 않으면 버튼이 숨겨집니다.
+
+`<home>/push/` 에 저장합니다: `vapid.json`(서버의 P-256 키 쌍. 처음 쓸 때 만들고 임시 파일에 쓴 뒤 이름을 바꿈)과 `subscriptions.json`(endpoint당 한 항목: `endpoint`, `keys`, `created`, `ua`, `via`). 둘 다 비밀이며 이 PC에만 있습니다. 보내기는 구독의 endpoint로 `TTL: 86400`, `Urgency: high`, VAPID `Authorization` 헤더(ES256 JWT, 12시간), RFC 8291 `aes128gcm` 본문을 담아 POST하는 것입니다. 201/202면 전달, 404/410이면 구독을 지우고, 그 밖은 로그를 남기고 구독을 둡니다.
+
+한계:
+
+- 내용(제목, 본문, `/p/<id>`)은 브라우저까지 종단 간 암호화되어, 푸시 서비스(Google, Mozilla, Apple)는 무언가 보냈다는 사실만 봅니다.
+- PC가 켜져 있고 서버가 돌고 있어야 합니다. 서버가 꺼져 있으면 쌓아 두지 않습니다.
+- Android(삼성 인터넷): 탭과 브라우저를 닫아도 옵니다. 단 브라우저 앱을 강제 종료했거나 배터리 제한을 걸었다면 오지 않습니다.
+- PC: 브라우저 프로그램이 실행 중이어야 합니다(백그라운드 프로세스면 충분하고 탭은 닫아도 됩니다).
+- 브라우저마다, origin마다(PC의 `http://127.0.0.1:4377`, 휴대폰의 tailnet `https` origin) 따로 구독합니다.
 
 ## Tailnet
 

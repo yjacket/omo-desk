@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTmpHome } from "./helpers/tmp-home.mjs";
@@ -54,6 +55,7 @@ async function withServer(t, options = {}) {
 		config: { v: 1, port: 0, publicBase: null, pcTailnetIps: ["100.64.0.9"], ...(options.config || {}) },
 		...(options.now ? { now: options.now } : {}),
 		...(options.asidePath ? { asidePath: options.asidePath } : {}),
+		...(options.pusher ? { pusher: options.pusher } : {}),
 	});
 	const { port } = await server.listen();
 	t.after(async () => {
@@ -622,4 +624,257 @@ test("server.json is written on listen with the package version", async (t) => {
 	assert.equal(parsed.port, ctx.port);
 	assert.equal(parsed.pid, process.pid);
 	assert.equal(typeof parsed.started, "string");
+});
+
+function fakePusher() {
+	const waiting = [];
+	const welcomeWaiting = [];
+	const pusher = {
+		publicKey: "fake-public-key",
+		calls: [],
+		welcomes: [],
+		subscribed: [],
+		unsubscribed: [],
+		subscribe(subscription, meta) {
+			pusher.subscribed.push({ subscription, meta });
+		},
+		unsubscribe(endpoint) {
+			pusher.unsubscribed.push(endpoint);
+		},
+		list: () => [],
+		notify(message) {
+			pusher.calls.push(message);
+			waiting.shift()?.(message);
+			return Promise.resolve([]);
+		},
+		notifyOne(subscription, message) {
+			pusher.welcomes.push({ subscription, message });
+			welcomeWaiting.shift()?.(message);
+			return Promise.resolve({ delivered: true });
+		},
+		nextNotify: () => new Promise((resolve) => waiting.push(resolve)),
+		nextWelcome: () => new Promise((resolve) => welcomeWaiting.push(resolve)),
+	};
+	return pusher;
+}
+
+function validSubscription(endpoint = "https://fcm.example.test/fcm/send/abc") {
+	const ua = crypto.createECDH("prime256v1");
+	ua.generateKeys();
+	return {
+		endpoint,
+		keys: { p256dh: ua.getPublicKey().toString("base64url"), auth: crypto.randomBytes(16).toString("base64url") },
+	};
+}
+
+const TAILNET = { "x-forwarded-for": "100.64.0.20", "tailscale-user-login": "me@x" };
+
+test("/sw.js is served as javascript with scope and no-cache headers", async (t) => {
+	const ctx = await withServer(t);
+	const res = await fetch(`${ctx.base}/sw.js`);
+	assert.equal(res.status, 200);
+	assert.equal(res.headers.get("content-type"), "text/javascript; charset=utf-8");
+	assert.equal(res.headers.get("service-worker-allowed"), "/");
+	assert.equal(res.headers.get("cache-control"), "no-cache");
+	assert.match(await res.text(), /notificationclick/);
+	const funnel = await fetch(`${ctx.base}/sw.js`, { headers: { "tailscale-funnel-request": "1" } });
+	assert.equal(funnel.status, 403);
+});
+
+test("/api/push/key returns the pusher's public key", async (t) => {
+	const ctx = await withServer(t, { pusher: fakePusher() });
+	const res = await fetch(`${ctx.base}/api/push/key`);
+	assert.equal(res.status, 200);
+	assert.equal(res.headers.get("cache-control"), "no-store");
+	assert.deepEqual(await res.json(), { publicKey: "fake-public-key" });
+});
+
+test("the default pusher creates vapid.json under the home and serves its key", async (t) => {
+	const ctx = await withServer(t);
+	const { publicKey } = await (await fetch(`${ctx.base}/api/push/key`)).json();
+	assert.equal(Buffer.from(publicKey, "base64url").length, 65);
+	assert.ok(fs.existsSync(path.join(ctx.home, "push", "vapid.json")));
+});
+
+test("subscribe rejects a bad endpoint or bad keys with bad_input", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const good = validSubscription();
+	const cases = [
+		{ ...good, endpoint: "http://fcm.example.test/x" },
+		{ ...good, endpoint: "not a url" },
+		{ ...good, endpoint: `https://fcm.example.test/${"a".repeat(2048)}` },
+		{ endpoint: good.endpoint },
+		{ ...good, keys: { ...good.keys, p256dh: Buffer.alloc(65, 1).toString("base64url") } },
+		{ ...good, keys: { ...good.keys, p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(32)]).toString("base64url") } },
+		{ ...good, keys: { ...good.keys, auth: crypto.randomBytes(15).toString("base64url") } },
+		{ ...good, keys: { ...good.keys, auth: 42 } },
+	];
+	for (const subscription of cases) {
+		const res = await postJson(ctx.base, "/api/push/subscribe", { subscription });
+		assert.equal(res.status, 400, JSON.stringify(subscription).slice(0, 80));
+		assert.deepEqual(await res.json(), { error: "bad_input" });
+	}
+	const missing = await postJson(ctx.base, "/api/push/subscribe", {});
+	assert.equal(missing.status, 400);
+	assert.equal(pusher.subscribed.length, 0);
+});
+
+test("subscribe stores the subscription and sends the welcome push to it only", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const subscription = validSubscription();
+	const welcome = pusher.nextWelcome();
+	const res = await postJson(ctx.base, "/api/push/subscribe", { subscription }, { "user-agent": "Samsung/1".padEnd(300, "x") });
+	assert.equal(res.status, 200);
+	assert.deepEqual(await res.json(), { ok: true });
+	assert.deepEqual(await welcome, {
+		title: "알림이 켜졌습니다",
+		body: "새 기획안과 답이 오면 알려 드립니다",
+		url: "/",
+		tag: "vb-welcome",
+	});
+	assert.equal(pusher.subscribed.length, 1);
+	assert.deepEqual(pusher.subscribed[0].subscription, subscription);
+	assert.equal(pusher.subscribed[0].meta.via, "local");
+	assert.equal(pusher.subscribed[0].meta.ua.length, 200);
+	assert.equal(pusher.calls.length, 0);
+});
+
+test("subscribe is refused for the funnel header and allowed over the tailnet", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const subscription = validSubscription();
+	const funnel = await postJson(ctx.base, "/api/push/subscribe", { subscription }, { "tailscale-funnel-request": "1" });
+	assert.equal(funnel.status, 403);
+	assert.equal(pusher.subscribed.length, 0);
+
+	const welcome = pusher.nextWelcome();
+	const tailnet = await postJson(ctx.base, "/api/push/subscribe", { subscription }, TAILNET);
+	assert.equal(tailnet.status, 200);
+	await welcome;
+	assert.equal(pusher.subscribed[0].meta.via, "tailnet");
+
+	const stranger = await postJson(ctx.base, "/api/push/subscribe", { subscription }, { "x-forwarded-for": "100.64.0.21" });
+	assert.equal(stranger.status, 403);
+});
+
+test("unsubscribe removes the endpoint and needs the same guard", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const endpoint = "https://fcm.example.test/fcm/send/abc";
+	const res = await postJson(ctx.base, "/api/push/unsubscribe", { endpoint }, TAILNET);
+	assert.equal(res.status, 200);
+	assert.deepEqual(await res.json(), { ok: true });
+	assert.deepEqual(pusher.unsubscribed, [endpoint]);
+	const funnel = await postJson(ctx.base, "/api/push/unsubscribe", { endpoint }, { "tailscale-funnel-request": "1" });
+	assert.equal(funnel.status, 403);
+	const bare = await fetch(`${ctx.base}/api/push/unsubscribe`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ endpoint }),
+	});
+	assert.equal(bare.status, 403);
+	assert.deepEqual(pusher.unsubscribed, [endpoint]);
+});
+
+test("a new proposal notifies once; an identical resubmit does not", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const dir = makeBoard(ctx.home);
+	const next = pusher.nextNotify();
+	const { body: sub } = await submit(ctx, { srcDir: dir, title: "로그인 개편" });
+	const message = await next;
+	const id = sub.summary.id;
+	assert.equal(message.title, "새 기획안 · 로그인 개편");
+	assert.equal(message.body, `${sub.summary.product.name || sub.summary.product.key} · ${sub.summary.feature.branch}`);
+	assert.equal(message.url, `/p/${id}`);
+	assert.equal(message.tag, `vb-${id}`);
+	assert.equal(pusher.calls.length, 1);
+
+	const again = await submit(ctx, { srcDir: dir, title: "로그인 개편" });
+	assert.equal(again.body.existing, true);
+	// the next real event comes after the resubmit, so a stray notify from it would show up first
+	const reply = pusher.nextNotify();
+	await postJson(ctx.base, `/api/p/${id}/reply`, { text: "확인", session: { id: "s1" } });
+	assert.match((await reply).title, /^답이 왔습니다/);
+	assert.equal(pusher.calls.length, 2);
+});
+
+test("revise notifies with the note, or product and branch without one", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const { body: sub } = await submit(ctx, { srcDir: makeBoard(ctx.home), title: "개편" });
+	const id = sub.summary.id;
+	const where = `${sub.summary.product.name || sub.summary.product.key} · ${sub.summary.feature.branch}`;
+
+	const withNote = pusher.nextNotify();
+	const first = await postJson(ctx.base, `/api/p/${id}/revise`, { srcDir: makeBoard(ctx.home, "proto-r2"), note: "색을 바꿨습니다", session: { id: "s1" } });
+	assert.equal(first.status, 200);
+	const noteMessage = await withNote;
+	assert.equal(noteMessage.title, "수정본 2 · 개편");
+	assert.equal(noteMessage.body, "색을 바꿨습니다");
+	assert.equal(noteMessage.url, `/p/${id}`);
+	assert.equal(noteMessage.tag, `vb-${id}`);
+
+	const plain = pusher.nextNotify();
+	const parsed = board();
+	parsed.lead = "세 번째";
+	const third = makeBoard(ctx.home, "proto-r3");
+	fs.writeFileSync(path.join(third, "board.json"), JSON.stringify(parsed));
+	await postJson(ctx.base, `/api/p/${id}/revise`, { srcDir: third, session: { id: "s1" } });
+	const plainMessage = await plain;
+	assert.equal(plainMessage.title, "수정본 3 · 개편");
+	assert.equal(plainMessage.body, where);
+});
+
+test("a session reply notifies with the text cut to 120 chars", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const { body: sub } = await submit(ctx, { srcDir: makeBoard(ctx.home), title: "답장" });
+	const id = sub.summary.id;
+	const next = pusher.nextNotify();
+	const res = await postJson(ctx.base, `/api/p/${id}/reply`, { text: "가".repeat(200), session: { id: "s1" } });
+	assert.equal(res.status, 200);
+	const message = await next;
+	assert.equal(message.title, "답이 왔습니다 · 답장");
+	assert.equal(message.body, "가".repeat(120));
+	assert.equal(message.url, `/p/${id}`);
+	assert.equal(message.tag, `vb-${id}`);
+});
+
+test("owner feedback and closes do not notify", async (t) => {
+	const pusher = fakePusher();
+	const ctx = await withServer(t, { pusher });
+	const first = pusher.nextNotify();
+	const { body: sub } = await submit(ctx, { srcDir: makeBoard(ctx.home), session: "owner-9", title: "조용히" });
+	await first;
+	const id = sub.summary.id;
+	assert.equal(pusher.calls.length, 1);
+
+	const feedback = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "수정" }, TAILNET);
+	assert.equal(feedback.status, 200);
+	const dismiss = await postJson(ctx.base, `/api/p/${id}/dismiss`, {});
+	assert.equal(dismiss.status, 200);
+	const second = await submit(ctx, { srcDir: makeBoard(ctx.home, "other"), session: "owner-9", title: "닫기" });
+	const closing = await postJson(ctx.base, `/api/p/${second.body.summary.id}/close`, { summary: "끝", session: { id: "owner-9" } });
+	assert.equal(closing.status, 200);
+	// two proposals were created, so exactly the two "new proposal" pushes exist and nothing else
+	assert.deepEqual(pusher.calls.map((message) => message.title), ["새 기획안 · 조용히", "새 기획안 · 닫기"]);
+});
+
+test("a failing pusher is logged and never changes the HTTP response", async (t) => {
+	const pusher = fakePusher();
+	const failed = new Promise((resolve) => {
+		pusher.notify = () => {
+			resolve();
+			return Promise.reject(new Error("push exploded"));
+		};
+	});
+	const ctx = await withServer(t, { pusher });
+	const { res } = await submit(ctx, { srcDir: makeBoard(ctx.home), title: "실패" });
+	assert.equal(res.status, 200);
+	await failed;
+	const text = await waitForText(path.join(ctx.home, "logs", "server.log"), /push notify failed: Error: push exploded/);
+	assert.match(text, /push exploded/);
 });
