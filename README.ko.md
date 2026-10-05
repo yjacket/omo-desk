@@ -247,6 +247,8 @@ node --test "test/**/*.test.mjs"
 
 테스트는 임시 home, 포트 0, `reg`·`tailscale`·`wscript` 가짜 실행기, 짧은 확인 간격을 씁니다. 실제 시간을 기다리지 않고, 실제 home, agent 폴더, tailscale도 건드리지 않습니다.
 
+기획안 페이지 브라우저 QA(Bun 1.4 이상과 Chrome 필요, `node --test` 에는 들어가지 않음): `bun qa/send-qa.mjs`, `bun qa/viewer-qa.mjs`, `bun qa/read-aloud-qa.mjs`. 각각 임시 home에서 `src/server.mjs` 를 띄우고(포트 4399, 4395, 4398) 휴대폰·데스크톱 너비로 헤드리스 Chrome을 움직인 뒤 `N/N checks passed` 로 끝나고, 스크린샷은 출력한 임시 폴더에 남깁니다.
+
 ## 한계
 
 - 설치, 자동 시작, 서버 실행은 Windows 전용입니다.

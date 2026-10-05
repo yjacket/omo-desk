@@ -247,6 +247,8 @@ node --test "test/**/*.test.mjs"
 
 Tests use temp homes, port 0, fake runners for `reg`, `tailscale` and `wscript`, and short poll intervals. None of them wait on wall-clock time or touch the real home, agent dir or tailscale.
 
+Browser QA for the proposal page (needs Bun 1.4+ and Chrome; not part of `node --test`): `bun qa/send-qa.mjs`, `bun qa/viewer-qa.mjs`, `bun qa/read-aloud-qa.mjs`. Each starts `src/server.mjs` on a temp home (ports 4399, 4395, 4398), drives headless Chrome at phone and desktop widths, ends with `N/N checks passed`, and leaves its screenshots in the temp dir it prints.
+
 ## Limits
 
 - Windows only for install, autostart and launching.
