@@ -64,7 +64,7 @@ node "$HOME/.omo-visual-board/app/bin/vb.mjs" submit .omo/boards/<slug>
 
 In the rest of this skill, `vb` means `node "$HOME/.omo-visual-board/app/bin/vb.mjs"` (the messages the extension delivers already print the full command).
 
-It prints `id: <id>` and `url: <url>`. Put the url line in your reply to the user. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `vb revise <id> <dir>` instead, or `submit --new`.
+It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as a bare URL on its own line, not in backticks or a code block: only a bare URL becomes a terminal hyperlink, which stays whole when a phone screen wraps it. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `vb revise <id> <dir>` instead, or `submit --new`.
 
 ## After submitting
 

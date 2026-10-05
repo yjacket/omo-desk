@@ -183,6 +183,7 @@ senpi 확장(`extension/visual-board.ts`)은 하위 세션이나 task member 세
 - Funnel은 절대 쓰지 않습니다. 서버도 Funnel 요청을 거부합니다.
 - 443은 건드리지 않습니다. 설치는 먼저 `serve status --json` 을 저장하고, 4378을 추가한 뒤 443 Web 항목, AllowFunnel, TCP 443이 그대로인지 확인합니다. 하나라도 다르면 4378을 다시 끄고 `failed:443-guard` 를 보고합니다. 기준값은 `doctor` 용으로 `baseline443` 에 저장합니다.
 - 외부 URL은 `https://<machine>.<tailnet>.ts.net:4378/p/<id>` 꼴입니다.
+- Orca 모바일 앱은 누른 화면 줄의 글자만 링크로 읽어서, 줄바꿈된 URL은 뒷부분(`:4378/...`)이 잘립니다. 터미널 하이퍼링크로 나가야 통째로 열립니다. `~/.omo/agent/settings.json` 에 `"terminal": { "hyperlinks": true }` 를 넣고(senpi는 Windows의 Orca에서 하이퍼링크를 꺼 둡니다), URL은 백틱 없이 그대로 출력합니다.
 
 ## 테스트
 

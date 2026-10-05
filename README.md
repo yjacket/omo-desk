@@ -183,6 +183,7 @@ Session ids come from `VB_SESSION` or `PI_SESSION_ID`.
 - Never Funnel. Funnel requests are rejected by the server too.
 - 443 is untouched. Install snapshots `serve status --json` first, and after adding 4378 it checks that the 443 Web entry, AllowFunnel and TCP 443 are unchanged. Any difference turns 4378 off again and reports `failed:443-guard`. The baseline is saved as `baseline443` for `doctor`.
 - Public URLs look like `https://<machine>.<tailnet>.ts.net:4378/p/<id>`.
+- The Orca mobile app reads a tapped link from the tapped screen row only, so a wrapped URL loses its tail (`:4378/...`). It opens whole only as a terminal hyperlink: set `"terminal": { "hyperlinks": true }` in `~/.omo/agent/settings.json` (senpi leaves hyperlinks off for Orca on Windows), and print the URL bare, not in backticks.
 
 ## Tests
 
