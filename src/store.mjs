@@ -203,6 +203,7 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 		return {
 			id: proposal.id,
 			title: proposal.title,
+			kind: proposal.kind ?? "decision",
 			product: { key: proposal.product.key, name: proposal.product.name },
 			feature: { key: proposal.feature.key, branch: proposal.feature.branch, worktree: proposal.feature.worktree },
 			status: statusOf(entry),
@@ -280,7 +281,7 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 		return null;
 	}
 
-	function create({ identity, title, srcDir, files = [], note = null, force = false } = {}) {
+	function create({ identity, title, srcDir, files = [], note = null, force = false, kind = "decision" } = {}) {
 		if (!identity || !title) throw fail("bad_input", "identity and title are required");
 		const hash = hashFiles(srcDir, files);
 		if (!force) {
@@ -314,14 +315,16 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 			product: identity.product,
 			feature: identity.feature,
 			session: identity.session ?? null,
+			kind: kind ?? "decision",
 		};
 		writeJson(path.join(dir, "proposal.json"), entry.proposal);
 		entries.set(id, entry);
 		return { summary: summaryOf(entry), existing: false };
 	}
 
-	function revise(id, { srcDir, files = [], note = null, session = null } = {}) {
+	function revise(id, { srcDir, files = [], note = null, session = null, kind = "decision" } = {}) {
 		const entry = openEntry(id);
+		if ((kind ?? "decision") !== (entry.proposal.kind ?? "decision")) throw fail("bad_input", "kind");
 		const rev = revOf(entry) + 1;
 		const hash = hashFiles(srcDir, files);
 		copyRevision(entry.dir, srcDir, files, rev);
@@ -368,7 +371,13 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 		if (!existingRevs(entry).includes(rev)) throw fail("bad_rev", `no such revision: ${rev}`);
 		const board = readJson(path.join(entry.dir, "revs", String(rev), "board.json")) || {};
 		const { frames, questions } = boardFacts(board);
-		if (verdict !== "change" && verdict !== "approve") throw fail("bad_input", "verdict");
+		const kind = entry.proposal.kind ?? "decision";
+		if (kind === "report") {
+			if (verdict !== "ack") throw fail("bad_input", "verdict");
+		} else if (verdict !== "change" && verdict !== "approve") {
+			throw fail("bad_input", "verdict");
+		}
+		if (verdict === "ack" && Object.keys(answers || {}).length > 0) throw fail("bad_input", "answers");
 		for (const [qid, value] of Object.entries(answers || {})) {
 			if (!questions.has(qid)) throw fail("bad_input", `answers: unknown question ${qid}`);
 			if (!questions.get(qid).has(value)) throw fail("bad_input", `answers.${qid}: unknown option value`);
@@ -390,6 +399,7 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 			fs.writeFileSync(file, mark.crop);
 			return { ...mark, crop: rel };
 		});
+		const nothingToDeliver = verdict === "ack" && !comment && storedMarks.length === 0;
 		const event = {
 			seq,
 			type: "feedback",
@@ -403,8 +413,12 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 			client,
 			ua: String(ua).slice(0, 200),
 			routed,
+			...(nothingToDeliver ? { delivery: "none" } : {}),
 		};
 		writeEvent(entry, event);
+		if (nothingToDeliver) {
+			writeEvent(entry, { seq: entry.nextSeq, type: "closed", at: now().toISOString(), by: "user", summary: null, session: null });
+		}
 		return { summary: summaryOf(entry), event, owner: routed };
 	}
 
@@ -422,8 +436,9 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 
 	function withDelivery(entry, event) {
 		if (event.type !== "feedback") return event;
+		const nothingToDeliver = event.verdict === "ack" && !event.comment && (!event.marks || event.marks.length === 0);
 		const file = event.routed == null ? null : inboxPath(event.routed, entry.proposal.id, event.seq);
-		return { ...event, delivery: event.routed == null ? "none" : fs.existsSync(file) ? "pending" : "delivered" };
+		return { ...event, delivery: event.routed == null || nothingToDeliver ? "none" : fs.existsSync(file) ? "pending" : "delivered" };
 	}
 
 	function revsOf(entry) {

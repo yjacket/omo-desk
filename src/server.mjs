@@ -292,8 +292,11 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 				const items = store
 					.list({ product: query.get("product"), feature: query.get("feature"), status })
 					.map((summary) => ({ ...summary, url: url(summary.id) }));
-				const counts = { mine: 0, theirs: 0, closed: 0 };
-				for (const summary of store.list({ status: "all" })) counts[summary.status]++;
+				const counts = { mine: 0, theirs: 0, closed: 0, reports: 0 };
+				for (const summary of store.list({ status: "all" })) {
+					counts[summary.status]++;
+					if (summary.status !== "closed" && summary.kind === "report") counts.reports++;
+				}
 				return sendJson(res, 200, { items, facets: store.facets(), counts });
 			}
 			if (parts[2] === "here" && parts.length === 3) {
@@ -486,6 +489,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			files: validated.files,
 			note: body.note ?? null,
 			force: body.force === true,
+			kind: validated.board.kind ?? "decision",
 		});
 		sendJson(res, 200, { summary, url: url(summary.id), existing: existing === true });
 		if (existing !== true) notifyLater(proposalMessage(`새 기획안 · ${summary.title}`, where(summary), summary.id));
@@ -499,6 +503,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			files: validated.files,
 			note: body.note ?? null,
 			session: body.session ?? null,
+			kind: validated.board.kind ?? "decision",
 		});
 		sendJson(res, 200, { summary, url: url(summary.id) });
 		const note = typeof body.note === "string" ? body.note.trim().slice(0, REPLY_BODY_LIMIT) : "";
@@ -515,7 +520,8 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			...feedbackBody(access, req),
 		});
 		const { summary, event, owner } = result;
-		if (owner != null) {
+		const deliverable = owner != null && event.delivery !== "none";
+		if (deliverable) {
 			const board = store.board(id, event.rev);
 			const text = feedbackMessage({ summary, board, event, url: url(id), cropDir: proposalDir(id), cli });
 			const payload = {
@@ -543,7 +549,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			seq: event.seq,
 			status: summary.status,
 			routed: owner,
-			delivery: owner == null ? "none" : "pending",
+			delivery: deliverable ? "pending" : "none",
 		});
 	}
 

@@ -420,6 +420,170 @@ test("get returns only events after since", () => {
 	}
 });
 
+test("report kind: create persists kind and summaries default to decision", () => {
+	const { home, cleanup, dataDir, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const report = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" });
+		assert.equal(report.summary.kind, "report");
+		assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "proposals", report.summary.id, "proposal.json"), "utf8")).kind, "report");
+
+		const decision = store.create({ identity: ident(home), title: "D", srcDir: src, files: filesFor() });
+		assert.equal(decision.summary.kind, "decision");
+		const proposal = JSON.parse(fs.readFileSync(path.join(dataDir, "proposals", decision.summary.id, "proposal.json"), "utf8"));
+		assert.equal(proposal.kind, "decision");
+		assert.equal(proposal.v, 1);
+		assert.equal(store.list({ status: "all" }).find((item) => item.id === report.summary.id).kind, "report");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: a legacy proposal without kind reads as decision", () => {
+	const { home, cleanup, dataDir, inboxDir } = setup();
+	try {
+		const id = "260101-aaaa";
+		const dir = path.join(dataDir, "proposals", id);
+		fs.mkdirSync(path.join(dir, "events"), { recursive: true });
+		fs.writeFileSync(path.join(dir, "proposal.json"), JSON.stringify({
+			v: 1,
+			id,
+			title: "Legacy",
+			created: "2026-01-01T00:00:00.000Z",
+			product: PRODUCT,
+			feature: { key: FEATURE_KEY, branch: "main", worktree: home },
+			session: null,
+		}));
+		const rebuilt = createStore({ dataDir, inboxDir, now: clock() });
+		assert.equal(rebuilt.get(id).summary.kind, "decision");
+		assert.equal(rebuilt.list({ status: "all" })[0].kind, "decision");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: ack with a comment routes to the owner and writes one inbox file", () => {
+	const { home, cleanup, inboxDir, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		const result = store.feedback(id, { rev: 1, verdict: "ack", comment: "확인했습니다", answers: {}, marks: [] });
+		assert.equal(result.summary.status, "theirs");
+		assert.equal(result.summary.lastType, "feedback");
+		assert.equal(result.event.routed, "s1");
+		assert.equal(result.owner, "s1");
+		assert.equal(store.get(id).events.some((event) => event.type === "closed"), false);
+
+		const payload = { v: 1, proposalId: id, seq: result.event.seq, title: "R", url: "http://x/p/" + id, approved: false, text: "확인했습니다" };
+		store.writeInbox(result.event.routed, payload);
+		assert.equal(fs.readdirSync(path.join(inboxDir, safeSegment("s1"))).length, 1);
+		assert.equal(store.get(id).events.find((event) => event.type === "feedback").delivery, "pending");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: ack without comment or marks closes by user with delivery none", () => {
+	const { home, cleanup, dataDir, inboxDir, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		const result = store.feedback(id, { rev: 1, verdict: "ack", answers: {}, marks: [] });
+		assert.equal(result.summary.status, "closed");
+		assert.equal(result.summary.lastType, "closed");
+		assert.equal(result.summary.outcome, null);
+		assert.equal(result.event.routed, "s1");
+
+		const stored = JSON.parse(fs.readFileSync(path.join(dataDir, "proposals", id, "events", "000002-feedback.json"), "utf8"));
+		assert.equal(stored.delivery, "none");
+		assert.equal(store.get(id).events.find((event) => event.type === "feedback").delivery, "none");
+		const closed = store.get(id).events.find((event) => event.type === "closed");
+		assert.equal(closed.by, "user");
+		assert.equal(closed.summary, null);
+		assert.equal(fs.existsSync(path.join(inboxDir, safeSegment("s1"))), false);
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: ack with marks only routes like a comment", () => {
+	const { home, cleanup, inboxDir, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		const result = store.feedback(id, { rev: 1, verdict: "ack", answers: {}, marks: [{ frame: "f1", x: 0, y: 0, w: 0.5, h: 0.5 }] });
+		assert.equal(result.summary.status, "theirs");
+		assert.equal(store.get(id).events.some((event) => event.type === "closed"), false);
+		store.writeInbox(result.event.routed, { v: 1, proposalId: id, seq: result.event.seq, title: "R", url: "u", approved: false, text: "" });
+		assert.equal(fs.readdirSync(path.join(inboxDir, safeSegment("s1"))).length, 1);
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: wrong verdicts per board kind are bad_input verdict", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home, { questions: QUESTIONS });
+		const report = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		assert.equal(codeOf(() => store.feedback(report, { rev: 1, verdict: "approve", answers: {}, comment: "", marks: [] })).message, "verdict");
+		assert.equal(codeOf(() => store.feedback(report, { rev: 1, verdict: "change", comment: "x", answers: {}, marks: [] })).code, "bad_input");
+
+		const decision = store.create({ identity: ident(home), title: "D", srcDir: src, files: filesFor() }).summary.id;
+		assert.equal(codeOf(() => store.feedback(decision, { rev: 1, verdict: "ack", answers: {}, marks: [] })).message, "verdict");
+		assert.equal(codeOf(() => store.feedback(decision, { rev: 1, verdict: "ack", comment: "x", answers: {}, marks: [] })).code, "bad_input");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: ack with answers is bad_input answers", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		const error = codeOf(() => store.feedback(id, { rev: 1, verdict: "ack", comment: "x", answers: { q1: "a" }, marks: [] }));
+		assert.equal(error.code, "bad_input");
+		assert.equal(error.message, "answers");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: revise keeps the kind and rejects a mismatched board", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		const mismatched = codeOf(() => store.revise(id, { srcDir: src, files: filesFor(), note: "v2", session: { id: "s1", file: null } }));
+		assert.equal(mismatched.code, "bad_input");
+		assert.equal(mismatched.message, "kind");
+		assert.equal(store.get(id).summary.rev, 1);
+		assert.equal(fs.existsSync(path.join(home, "data", "proposals", id, "revs", "2")), false);
+
+		const revised = store.revise(id, { srcDir: src, files: filesFor(), note: "v2", session: { id: "s1", file: null }, kind: "report" });
+		assert.equal(revised.rev, 2);
+		assert.equal(revised.kind, "report");
+
+		const decision = store.create({ identity: ident(home), title: "D", srcDir: src, files: filesFor() }).summary.id;
+		assert.equal(codeOf(() => store.revise(decision, { srcDir: src, files: filesFor(), note: "v2", session: null, kind: "report" })).message, "kind");
+	} finally {
+		cleanup();
+	}
+});
+
+test("report kind: feedback after a comment-less ack is closed", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home);
+		const id = store.create({ identity: ident(home), title: "R", srcDir: src, files: filesFor(), kind: "report" }).summary.id;
+		store.feedback(id, { rev: 1, verdict: "ack", answers: {}, marks: [] });
+		assert.equal(codeOf(() => store.feedback(id, { rev: 1, verdict: "ack", comment: "late", answers: {}, marks: [] })).code, "closed");
+	} finally {
+		cleanup();
+	}
+});
+
 test("forWorktree scopes by worktree and adopts deleted worktrees", () => {
 	const { home, cleanup, store } = setup();
 	try {

@@ -46,6 +46,21 @@ function makeBoard(home, name = "proto") {
 	return dir;
 }
 
+function reportBoard(home, name = "report") {
+	const dir = path.join(home, name);
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(
+		path.join(dir, "board.json"),
+		JSON.stringify({
+			title: "완료 보고",
+			kind: "report",
+			sections: [{ title: "결과", cards: [{ title: "화면", frames: [["완료 화면", "screen.svg"]] }] }],
+		}),
+	);
+	fs.writeFileSync(path.join(dir, "screen.svg"), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+	return dir;
+}
+
 async function withServer(t, options = {}) {
 	const tmp = makeTmpHome("desk-srv-");
 	const server = createServer({
@@ -276,8 +291,109 @@ test("proposal counts stay overall across filters", async (t) => {
 		const res = await fetch(`${ctx.base}/api/proposals?status=${status}`);
 		assert.equal(res.status, 200, status);
 		const body = await res.json();
-		assert.deepEqual(body.counts, { mine: 1, theirs: 1, closed: 1 }, status);
+		assert.deepEqual(body.counts, { mine: 1, theirs: 1, closed: 1, reports: 0 }, status);
 	}
+});
+
+test("a report submit keeps its kind and an ack with a comment routes to the owner", async (t) => {
+	const ctx = await withServer(t);
+	const dir = reportBoard(ctx.home);
+	const { body: sub } = await submit(ctx, { srcDir: dir, session: "owner-report", title: "완료 보고" });
+	assert.equal(sub.summary.kind, "report");
+	assert.equal(sub.summary.status, "mine");
+	const id = sub.summary.id;
+
+	const listed = await (await fetch(`${ctx.base}/api/proposals`)).json();
+	assert.equal(listed.items[0].kind, "report");
+	assert.equal(listed.counts.reports, 1);
+
+	const res = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "ack", comment: "확인했습니다" });
+	assert.equal(res.status, 200);
+	const fb = await res.json();
+	assert.equal(fb.status, "theirs");
+	assert.equal(fb.routed, "owner-report");
+	assert.equal(fb.delivery, "pending");
+	const inbox = path.join(ctx.home, "inbox", safeSegment("owner-report"), `${id}-${String(fb.seq).padStart(6, "0")}.json`);
+	assert.ok(fs.existsSync(inbox), "inbox file exists");
+
+	const detail = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
+	assert.equal(detail.summary.kind, "report");
+	assert.equal(detail.events.some((event) => event.type === "closed"), false);
+
+	const closed = await postJson(ctx.base, `/api/p/${id}/close`, { summary: "확인", session: { id: "owner-report" } });
+	assert.equal(closed.status, 200);
+	assert.equal((await closed.json()).summary.status, "closed");
+});
+
+test("a comment-less ack closes by the user with no delivery", async (t) => {
+	const ctx = await withServer(t);
+	const dir = reportBoard(ctx.home, "report-2");
+	const { body: sub } = await submit(ctx, { srcDir: dir, session: "owner-ack", title: "완료 보고 2" });
+	const id = sub.summary.id;
+	assert.equal((await (await fetch(`${ctx.base}/api/proposals`)).json()).counts.reports, 1);
+
+	const res = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "ack" });
+	assert.equal(res.status, 200);
+	const fb = await res.json();
+	assert.equal(fb.delivery, "none");
+	assert.equal(fb.status, "closed");
+	assert.equal(fb.routed, "owner-ack");
+
+	const detail = await (await fetch(`${ctx.base}/api/p/${id}`)).json();
+	const feedback = detail.events.find((event) => event.type === "feedback");
+	assert.equal(feedback.verdict, "ack");
+	assert.equal(feedback.delivery, "none");
+	const closed = detail.events.find((event) => event.type === "closed");
+	assert.equal(closed.by, "user");
+	assert.equal(detail.summary.status, "closed");
+	assert.equal(detail.summary.outcome, null);
+
+	const inboxDir = path.join(ctx.home, "inbox", safeSegment("owner-ack"));
+	if (fs.existsSync(inboxDir)) assert.deepEqual(fs.readdirSync(inboxDir), []);
+	assert.equal((await (await fetch(`${ctx.base}/api/proposals`)).json()).counts.reports, 0);
+
+	const again = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "ack" });
+	assert.equal(again.status, 409);
+	assert.equal((await again.json()).error, "closed");
+});
+
+test("report and decision boards reject the other verdict and a question-ful report", async (t) => {
+	const ctx = await withServer(t);
+	const report = reportBoard(ctx.home, "report-3");
+	const decision = makeBoard(ctx.home, "decision-3");
+
+	const reportSub = await submit(ctx, { srcDir: report, session: "owner-v", title: "보고" });
+	const approve = await postJson(ctx.base, `/api/p/${reportSub.body.summary.id}/feedback`, { rev: 1, verdict: "approve" });
+	assert.equal(approve.status, 400);
+	assert.equal((await approve.json()).error, "bad_input");
+
+	const decisionSub = await submit(ctx, { srcDir: decision, session: "owner-v", title: "결정" });
+	assert.equal(decisionSub.body.summary.kind, "decision");
+	const ack = await postJson(ctx.base, `/api/p/${decisionSub.body.summary.id}/feedback`, { rev: 1, verdict: "ack" });
+	assert.equal(ack.status, 400);
+	assert.equal((await ack.json()).error, "bad_input");
+
+	const bad = path.join(ctx.home, "report-q");
+	fs.mkdirSync(bad, { recursive: true });
+	const questionBoard = JSON.parse(fs.readFileSync(path.join(report, "board.json"), "utf8"));
+	questionBoard.questions = [{ id: "q1", text: "왜?", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }];
+	fs.writeFileSync(path.join(bad, "board.json"), JSON.stringify(questionBoard));
+	fs.copyFileSync(path.join(report, "screen.svg"), path.join(bad, "screen.svg"));
+	const attempted = await submit(ctx, { srcDir: bad, title: "질문 있는 보고" });
+	assert.equal(attempted.res.status, 400);
+	assert.equal(attempted.body.error, "invalid_board");
+	assert.ok(attempted.body.details.some((line) => line.includes("questions")), JSON.stringify(attempted.body.details));
+
+	const revised = await postJson(ctx.base, `/api/p/${reportSub.body.summary.id}/revise`, { srcDir: decision, session: { id: "owner-v" } });
+	assert.equal(revised.status, 400);
+	assert.equal((await revised.json()).error, "bad_input");
+});
+
+test("submit without kind reads as a decision board", async (t) => {
+	const ctx = await withServer(t);
+	const dir = makeBoard(ctx.home, "decision-4");
+	const { body: sub } = await submit(ctx, { srcDir: dir, title: "기본 결정" });
+	assert.equal(sub.summary.kind, "decision");
 });
 
 test("tailnet feedback is accepted but tailnet session writes are forbidden", async (t) => {

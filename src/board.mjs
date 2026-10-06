@@ -12,7 +12,7 @@ const LAYOUTS = new Set(["", "one", "two"]);
 const QUESTION_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const OPTION_VALUE = /^[A-Za-z0-9_.-]{1,60}$/;
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
-const TOP_KEYS = new Set(["title", "lead", "sections", "questions", "commentPlaceholder", "id", "sideSession"]);
+const TOP_KEYS = new Set(["title", "lead", "sections", "questions", "commentPlaceholder", "id", "sideSession", "kind"]);
 const SECTION_KEYS = new Set(["title", "desc", "cards"]);
 const CARD_KEYS = new Set(["badge", "title", "layout", "diagram", "gray", "note", "say", "frames"]);
 const QUESTION_KEYS = new Set(["id", "text", "help", "options"]);
@@ -73,6 +73,9 @@ function validateShape(board, root, errors) {
 	pushOptionalType(board, "lead", "string", "", errors);
 	pushOptionalType(board, "commentPlaceholder", "string", "", errors);
 	pushOptionalType(board, "sideSession", "string", "", errors);
+	if (board.kind !== undefined && board.kind !== "decision" && board.kind !== "report") {
+		errors.push('kind: must be "decision" or "report"');
+	}
 
 	const labels = new Map();
 	const frames = [];
@@ -99,6 +102,9 @@ function validateShape(board, root, errors) {
 				validateQuestion(question, `questions[${qi}]`, ids, errors);
 			});
 		}
+	}
+	if (board.kind === "report" && Array.isArray(board.questions) && board.questions.length >= 1) {
+		errors.push("questions: report boards take no questions");
 	}
 
 	if (frameCount === 0 && questionCount === 0) errors.push("board: must have at least one frame or one question");

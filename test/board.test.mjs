@@ -167,6 +167,34 @@ test("board with only a question is accepted", () => {
 	assert.deepEqual(result.files, ["board.json"]);
 });
 
+test("report board with a frame and no questions is accepted", () => {
+	const result = runBoard(okBoard({ kind: "report" }));
+	assert.equal(result.ok, true);
+	assert.equal(result.board.kind, "report");
+});
+
+test("board without kind stays undefined and may ask questions", () => {
+	const result = runBoard({ title: "t", questions: [goodQuestion()] }, {});
+	assert.equal(result.ok, true);
+	assert.equal(result.board.kind, undefined);
+});
+
+test("report board with a question is rejected", () => {
+	const list = errors(runBoard({ title: "t", kind: "report", questions: [goodQuestion()] }, {}));
+	assert.ok(list.some((e) => e.includes("questions: report boards take no questions")));
+});
+
+test("unknown kind is rejected", () => {
+	for (const kind of ["memo", "Report", "decision "]) {
+		const list = errors(runBoard(okBoard({ kind })));
+		assert.equal(list[0], 'kind: must be "decision" or "report"');
+	}
+});
+
+test("non-string kind is rejected", () => {
+	assert.equal(errors(runBoard(okBoard({ kind: 5 })))[0], 'kind: must be "decision" or "report"');
+});
+
 const NOT_LOCAL = "must be a local file inside the board dir (download the image into the board dir)";
 
 test("https frame path is rejected", () => {
