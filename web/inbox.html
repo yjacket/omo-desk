@@ -84,6 +84,7 @@
 		}
 		.page { max-width: var(--measure); margin: 0 auto; padding: var(--s6) var(--s4) var(--s10); }
 		.top { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s5); }
+		.heads { display: flex; align-items: baseline; gap: var(--s3); min-width: 0; }
 		.top[hidden], .bell[hidden] { display: none; }
 		.bell {
 			flex: none;
@@ -308,7 +309,10 @@
 <body>
 	<div class="page">
 		<header class="top">
-			<h1>검토함</h1>
+			<div class="heads">
+				<h1>검토함</h1>
+				<span class="sum" id="reportCount" hidden></span>
+			</div>
 			<button type="button" class="bell" id="bell" hidden>알림 받기</button>
 		</header>
 		<main>
@@ -358,12 +362,14 @@
 				notice: document.getElementById("notice"),
 				retry: document.getElementById("retry"),
 				list: document.getElementById("list"),
+				reportCount: document.getElementById("reportCount"),
 			};
 
 			let state = readState();
 			let facets = [];
 			let items = [];
 			let mine = 0;
+			let reports = 0;
 			let lastSig = null;
 			let requestSeq = 0;
 			let timer = null;
@@ -512,13 +518,15 @@
 			}
 
 			function rowOf(item) {
+				const report = item.kind === "report";
 				const chips = [h("span", { class: "chip chip-" + item.status }, CHIP[item.status] || item.status)];
+				if (report) chips.push(h("span", { class: "chip" }, "보고"));
 				if (item.status === "theirs" && item.approved) chips.push(h("span", { class: "chip chip-ok" }, "승인"));
 				return h(
 					"a",
 					{ class: "row", href: "/p/" + encodeURIComponent(item.id), "data-id": item.id },
 					h("div", { class: "row-head" }, h("span", { class: "title" }, item.title), ...chips),
-					h("span", { class: "rev" }, `${item.rev}안`),
+					h("span", { class: "rev" }, report ? `갱신 ${item.rev}` : `${item.rev}안`),
 					h("div", { class: "meta" }, `${item.product.name || item.product.key} · ${item.feature.branch}`),
 					h("div", { class: "act", "data-type": item.lastType || "", "data-updated": item.updated }, activityText(item.lastType, item.updated)),
 					item.status === "closed" && item.outcome ? h("div", { class: "outcome" }, item.outcome) : null,
@@ -560,22 +568,34 @@
 				return h("section", { class: "group" }, head, rowsOf(group.items));
 			}
 
+			function reportGroupOf(list) {
+				const head = h("div", { class: "group-head" }, h("h2", null, "보고"), h("span", { class: "sum" }, `${list.length}건`));
+				return h("section", { class: "group" }, head, rowsOf(list));
+			}
+
 			function renderList() {
 				const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".row") : null;
 				const focusedId = focused ? focused.getAttribute("data-id") : null;
 				els.list.replaceChildren();
+				const reportItems = items.filter((item) => item.kind === "report" && item.status !== "closed");
+				const boards = items.filter((item) => !reportItems.includes(item));
 				if (items.length === 0) {
 					els.list.append(h("p", { class: "empty" }, "검토할 것이 없습니다."));
-				} else if (state.product && (state.status === "closed" || state.status === "all")) {
-					const groups = new Map();
-					for (const item of items) {
-						const key = item.feature.key;
-						if (!groups.has(key)) groups.set(key, { key, items: [] });
-						groups.get(key).items.push(item);
-					}
-					for (const group of groups.values()) els.list.append(groupOf(group));
 				} else {
-					els.list.append(rowsOf(items));
+					if (boards.length) {
+						if (state.product && (state.status === "closed" || state.status === "all")) {
+							const groups = new Map();
+							for (const item of boards) {
+								const key = item.feature.key;
+								if (!groups.has(key)) groups.set(key, { key, items: [] });
+								groups.get(key).items.push(item);
+							}
+							for (const group of groups.values()) els.list.append(groupOf(group));
+						} else {
+							els.list.append(rowsOf(boards));
+						}
+					}
+					if (reportItems.length) els.list.append(reportGroupOf(reportItems));
 				}
 				if (focusedId) {
 					const again = els.list.querySelector(`.row[data-id="${focusedId}"]`);
@@ -657,6 +677,9 @@
 				facets = Array.isArray(data.facets) ? data.facets : [];
 				items = Array.isArray(data.items) ? data.items : [];
 				mine = data.counts && typeof data.counts.mine === "number" ? data.counts.mine : 0;
+				reports = data.counts && typeof data.counts.reports === "number" ? data.counts.reports : items.filter((item) => item.kind === "report" && item.status !== "closed").length;
+				els.reportCount.textContent = reports > 0 ? `보고 ${reports}` : "";
+				els.reportCount.hidden = reports === 0;
 				els.notice.hidden = true;
 				els.list.setAttribute("aria-busy", "false");
 				renderFilters();

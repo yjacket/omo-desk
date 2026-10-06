@@ -51,6 +51,7 @@
 		sendRow: $("sendRow"),
 		sendBtn: $("sendBtn"),
 		approveBtn: $("approveBtn"),
+		ackBtn: $("ackBtn"),
 		status: $("status"),
 		thread: $("thread"),
 		fab: $("aiFab"),
@@ -179,6 +180,15 @@
 		el.status.textContent = text;
 	}
 
+	function isReport() {
+		return Boolean(state.summary && state.summary.kind === "report");
+	}
+
+	// Report boards call their revisions 갱신; decision boards keep 안.
+	function revLabel(n) {
+		return isReport() ? `갱신 ${n}` : `${n}안`;
+	}
+
 	function canMark() {
 		return !state.readOnly && !state.closed;
 	}
@@ -202,6 +212,7 @@
 		document.title = s.title;
 		el.title.textContent = s.title;
 		const chips = [chip("제품", s.product.name || s.product.key), chip("기능", s.feature.branch)];
+		if (isReport()) chips.push('<span class="chip">보고</span>');
 		const started = sessionStart();
 		if (started) chips.push(`<span class="chip">세션 ${esc(started)} 시작</span>`);
 		chips.push(`<span class="chip status ${esc(s.status)}">${esc(STATUS_LABELS[s.status] || s.status)}</span>`);
@@ -216,7 +227,7 @@
 			button.type = "button";
 			button.setAttribute("role", "tab");
 			button.setAttribute("aria-selected", String(r.n === state.rev));
-			button.textContent = `${r.n}안`;
+			button.textContent = revLabel(r.n);
 			button.addEventListener("click", () => selectRev(r.n));
 			el.tabs.appendChild(button);
 		}
@@ -224,7 +235,7 @@
 
 	function showRevBanner(n) {
 		state.bannerRev = n;
-		el.revBannerText.textContent = `새 안(${n}안)이 올라왔습니다.`;
+		el.revBannerText.textContent = isReport() ? `갱신 ${n}이 올라왔습니다.` : `새 안(${n}안)이 올라왔습니다.`;
 		el.revBanner.hidden = false;
 	}
 
@@ -250,6 +261,12 @@
 		el.commentWrap.hidden = !inputsOn && !(state.closed && typed);
 		el.comment.disabled = !inputsOn;
 		el.sendRow.hidden = !inputsOn;
+		const report = isReport();
+		el.sendBtn.hidden = report;
+		el.approveBtn.hidden = report;
+		// A decision board's send row holds exactly 재요청/승인, so 확인 is not in its DOM at all.
+		if (report) el.ackBtn.hidden = false;
+		else el.ackBtn.remove();
 		el.marksCard.hidden = !inputsOn && marks.length === 0;
 		for (const node of el.marks.querySelectorAll("textarea,button")) node.disabled = !inputsOn;
 		syncViewer();
@@ -1087,10 +1104,12 @@
 
 	function renderDecide() {
 		const board = state.boards[state.rev] || {};
+		const heading = el.decideCard.querySelector("h3");
+		if (heading) heading.textContent = isReport() ? "확인" : "정할 것";
 		el.side.hidden = !board.sideSession;
 		el.side.textContent = board.sideSession || "";
 		el.questions.innerHTML = "";
-		for (const q of board.questions || []) {
+		for (const q of isReport() ? [] : board.questions || []) {
 			const node = document.createElement("div");
 			node.className = "q";
 			const options = (q.options || [])
@@ -1125,10 +1144,10 @@
 		let extra = "";
 		let body = "";
 		if (ev.type === "submitted" || ev.type === "revised") {
-			extra = `<span class="tag">${ev.rev}안</span>`;
+			extra = `<span class="tag">${revLabel(ev.rev)}</span>`;
 			body = ev.note ? esc(ev.note) : "";
 		} else if (ev.type === "feedback") {
-			extra = `<span class="tag">${ev.rev}안</span>${ev.verdict === "approve" ? '<span class="verdict approve">승인</span>' : ""}`;
+			extra = `<span class="tag">${revLabel(ev.rev)}</span>${ev.verdict === "approve" ? '<span class="verdict approve">승인</span>' : ""}`;
 			const answers = answerLines(ev);
 			if (answers.length) body += `<ul>${answers.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`;
 			if (ev.comment) body += esc(ev.comment);
@@ -1221,6 +1240,7 @@
 	function setBusy(busy) {
 		el.sendBtn.disabled = busy;
 		el.approveBtn.disabled = busy;
+		el.ackBtn.disabled = busy;
 	}
 
 	// Both buttons lock before the first await, so a double tap sends once. A sent proposal is the session's from here on:
@@ -1458,6 +1478,7 @@
 
 	el.sendBtn.addEventListener("click", () => send("change"));
 	el.approveBtn.addEventListener("click", () => send("approve"));
+	el.ackBtn.addEventListener("click", () => send("ack"));
 	el.listenBtn.hidden = !("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);
 	el.listenBtn.addEventListener("click", () => (reading ? stopListening() : startListening()));
 	el.stopFab.addEventListener("click", stopListening);
