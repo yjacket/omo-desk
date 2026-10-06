@@ -1,18 +1,25 @@
 ---
 name: visual-board
-description: Put up a visual board for the user when a change touches screens, DB schema or flows, before calling plan-reviewer, at the completion report, or whenever the user asks for a board or 그림.
+description: Put up a visual board whenever a change would otherwise be asked in chat - a decision board before plan confirmation for the larger choices, a report board at completion, or whenever the user asks for a board or 그림.
 ---
 
 # visual-board
 
-A board shows the user pictures of a change (screenshots, diagrams) plus a few questions, and collects their answer in a browser. Every board is kept as a record, so it has to carry its own files.
+A board shows the user pictures of a change (screenshots, diagrams) plus a few questions, and collects their answer in a browser. Every board is kept as a record, so it has to carry its own files. During execution, ask nothing in chat: only boards notify the user.
 
 ## When
 
-- During ulw runs: when a screen, DB schema or flow changes. Put one up before plan-reviewer and one at the completion report.
-- Any time the user asks for a board or 그림.
-- Skip it when the user says "보드 생략".
-- At session start, an omo-desk notice means the user left feedback. Handle that first.
+A board goes up at the moment you would otherwise ask the user a question. Pictures, diagrams and `듣기` explain the question better than prose.
+
+- Before confirming a plan: a decision board for the larger choices.
+- At completion: a report board (no questions) that shows at a glance what was done. Your first reply names the points the report will cover.
+- A fixed-procedure job such as an install: one report board at the end, not one per step.
+- A change inside the given task and its constraints is not a question. Decide it, and record the decision in the report board's `달라진 점` card.
+- A change outside your authority is a question: cost, deletion, scope, taste, and credentials, permissions, spend or any irreversible action. Put it on a decision board with the context, and if the user does not answer, follow the question tool's rule: take the recommended option when it is reversible, otherwise stop.
+- The user asks for a board or 그림: always.
+- The user says "보드 생략": skip that board.
+- Only the root session puts up boards. A child task reports its grounds to the root session instead.
+- At session start an omo-desk notice means the user left feedback. Read and dispose of it before anything else.
 
 ## Author
 
@@ -20,6 +27,7 @@ Make a folder `.omo/boards/<slug>/` with `board.json` and the files it points to
 
 ```json
 {
+	"kind": "decision",
 	"title": "수강권 확인 흐름",
 	"lead": "강의 목록 전에 수강권을 확인합니다.",
 	"sections": [{
@@ -29,7 +37,7 @@ Make a folder `.omo/boards/<slug>/` with `board.json` and the files it points to
 	"questions": [{
 		"id": "expired",
 		"text": "만료되면 어떻게 할까요?",
-		"help": "만료 회원이 목록을 볼 수 있는지가 정해집니다.",
+		"help": "지금은 만료된 회원에게 목록과 재생을 모두 보여 줍니다. 이 답에 따라 만료 회원이 보는 화면이 정해집니다.",
 		"options": [
 			{ "value": "block", "label": "목록 막기", "rec": true, "why": "수강권 안내 화면으로 갑니다." },
 			{ "value": "readonly", "label": "목록만 보기", "why": "재생만 막힙니다." }
@@ -38,9 +46,24 @@ Make a folder `.omo/boards/<slug>/` with `board.json` and the files it points to
 }
 ```
 
+A report board has no questions and carries the before and after side by side in a `달라진 점` card:
+
+```json
+{
+	"kind": "report",
+	"title": "설치 완료 보고",
+	"lead": "설치가 끝났습니다. 달라진 점만 봅니다.",
+	"sections": [{
+		"title": "달라진 점",
+		"cards": [{ "badge": "설치", "title": "앱과 스킬 교체", "layout": "two", "frames": [["이전", "before.png"], ["이후", "after.png"]] }]
+	}]
+}
+```
+
 Rules the server checks (schema `visual-board/1`, unknown keys are errors):
 
-- `title` is required. Optional: `lead`, `sections`, `questions`, `commentPlaceholder`, `sideSession`.
+- `title` is required. Optional: `kind`, `lead`, `sections`, `questions`, `commentPlaceholder`, `sideSession`.
+- `kind` is `"decision"` (the default when absent) or `"report"`. Any other value is an error. A `report` board has no `questions`: any question makes it invalid. Everything else is unchanged.
 - Card keys: `badge`, `title`, `layout` (`one`, `two` or empty), `diagram`, `gray`, `note`, `say`, `frames`.
 - `frames` is a list of `[label, path]`, at least one per card. Labels are unique across the whole board. At most 60 frames.
 - Paths are local, relative, forward slashes, inside the board folder. No URLs, no absolute paths: download images into the folder. Extensions: `.png .jpg .jpeg .gif .webp .svg .mmd`. Max 20 MiB per file, 100 MiB total.
@@ -49,9 +72,11 @@ Rules the server checks (schema `visual-board/1`, unknown keys are errors):
 
 Content:
 
+- Ask only about the outcome the user lives with, never about how the work is done. Do not ask about commit granularity, restarting an installed copy, whether to show a test board, or which tool to use: decide those and record the decision instead.
+- Every question gets `help` that states the situation which produced the question and what changes with the answer, written for a first-time reader - not a definition of terms.
 - Screenshots go in as PNG.
 - Diagrams are mermaid `.mmd` files used directly as frames: `flowchart`, `erDiagram`, `sequenceDiagram`, `stateDiagram-v2`.
-- Every question gets `help` (why it matters). Every option gets `why` (what happens if chosen). Mark exactly one option `rec: true`.
+- Every option gets `why` (what happens if chosen). Mark exactly one option `rec: true`.
 - Every card gets `say`: one to three Korean sentences that explain its pictures to someone listening without the screen, for example while driving. Say what the picture shows and what it means for the decision. Name things instead of pointing (no 위 그림, 왼쪽), and leave out paths, code and symbols. `듣기` reads the title, `lead`, each card's title and `say`, then every question with its options and `why`, so write those to be heard as well.
 - Write user-facing text in Korean, short and label-level.
 
@@ -65,13 +90,40 @@ node "$HOME/.omo-desk/app/bin/desk.mjs" submit .omo/boards/<slug>
 
 In the rest of this skill, `desk` means `node "$HOME/.omo-desk/app/bin/desk.mjs"` (the messages the extension delivers already print the full command).
 
-It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as a bare URL on its own line, not in backticks or a code block: only a bare URL becomes a terminal hyperlink, which stays whole when a phone screen wraps it. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `desk revise <id> <dir>` instead, or `submit --new`.
+It prints `id: <id>` and `url: <url>`. Put the url in your reply to the user as a bare URL on its own line, not in backticks or a code block: only a bare URL becomes a terminal hyperlink, which stays whole when a phone screen wraps it. Exit 2 means the board is invalid (errors on stderr). Exit 8 means an open proposal already exists: use `desk revise <id> <dir>` instead, or `submit --new`. First check the owner with `desk show <id> --json`. Revise only a board you own (or an ownerless one under the one-time binding rule in Identity). If another session owns it, use `submit --new` or leave it to that session.
+
+### Identity
+
+Read your own identity from the environment programmatically and pass it as a literal argument:
+
+- `env("PI_SESSION_ID")` is the session id, required under Senpi.
+- `env("PI_SESSION_FILE")` is the transcript path, optional.
+
+Pass both in the space form, with the actual values you read:
+
+```sh
+desk submit .omo/boards/<slug> --session 01a10d2e-f678-79d6-9625-27892d1759db --session-file /path/to/session.jsonl
+```
+
+Never shell-expand a possibly-absent variable and never use `--session=...`. The shell process often does not inherit `PI_SESSION_ID` (a monitor lane or a stripped shell loses it), so `$PI_SESSION_ID` silently becomes an empty or missing argument; the space form takes the value you read, and `--session=<value>` is silently ignored as an unknown option, so the board falls back to env identity - always use the space form. This applies to `submit`, `revise`, `reply`, `close` and `pending`. Run every command from the intended worktree: the board directory's location does not choose identity.
+
+When you run desk under a monitor, include `owner:` in the filter (for example `^(id|url|owner):`) so the owner line reaches you.
+
+The command prints `owner: <id>`. Before you tell the user feedback is connected, confirm that id equals your own session id. `owner: none` means an ownerless board that nothing will wake you about; if the board came up ownerless before any feedback, you may bind it to yourself once with a deliberate `desk revise` carrying a `--note` that says why. It creates a new revision and notifies the user's browser, so do it only once.
+
+Not running under Senpi: keep using `desk wait <id>` in the background. `desk show <id> --json` supplies an owner check; `wait` itself does not.
 
 ## After submitting
 
 - The extension delivers the user's feedback to you as a message. Read it in full with `desk show <id>`.
 - Answer a comment: `desk reply <id> <text>`.
+- Never `desk reply` to adopt a board while its feedback is pending: reply sets the status to mine and the extension can drop the waiting payload.
 - The user may answer every question in one comment, often dictated by voice. Match each answer to its question. When they ask for more explanation, revise the board with a fuller `say` (and `lead`) rather than only replying.
 - Change the board: edit the folder, then `desk revise <id> .omo/boards/<slug> --note "<what changed>"`.
+- Revise only when the board's content changes. Never revise on a timer to show progress.
 - Once the user chose 승인 and the work is done: `desk close <id> <summary>`. Copy the printed `record:` line into your report.
+- For a report board, put the URL in your final message and never `desk wait` on it. A 확인 without a comment closes it by itself. A 확인 with a comment arrives as feedback like today (or as the pending notice in the next conversation): read it, reply if needed, then `desk close <id> <summary>`.
+- When the user answers a board question in chat instead, run `desk close <id> "<the answer as given>"` at once.
+- When feedback arrives for a board whose decision is already settled, or whose work has moved on: run `desk show <id>`, compare it with the current state, `desk reply` that it was settled, and `desk close` without acting.
+- A blocker board's `lead` states what was being done, why it is blocked, the options with one recommendation, and what happens without an answer.
 - Not running under senpi? Start `desk wait <id>` in the background. It prints `FEEDBACK <id> <seq>` with the message when the user answers, or `CLOSED <id>`.
