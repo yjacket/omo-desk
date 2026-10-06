@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { makeTmpHome } from "./helpers/tmp-home.mjs";
 import { createServer } from "../src/server.mjs";
+import { createDesk } from "../extension/omo-desk.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = path.join(REPO, "web");
@@ -457,4 +458,319 @@ test("reply with a dash reads the text from stdin", async (t) => {
 	const show = await runCli(ctx, ["show", id]);
 	assert.ok(show.stdout.includes("from stdin"), show.stdout);
 	assert.ok(!show.stdout.includes("  -\n"), show.stdout);
+});
+
+// ---- task 3: explicit session options (--session / --session-file) ----------
+
+const STRIP_SESSION = { DESK_SESSION: undefined, PI_SESSION_ID: undefined, PI_SESSION_FILE: undefined };
+const STALE_ENV = { DESK_SESSION: "sess-B", PI_SESSION_ID: "sess-C", PI_SESSION_FILE: "C:/qa/stale-B.jsonl" };
+
+function fakePi() {
+	const handlers = new Map();
+	const sent = [];
+	return {
+		pi: {
+			on(event, handler) {
+				if (!handlers.has(event)) handlers.set(event, []);
+				handlers.get(event).push(handler);
+			},
+			sendMessage(message, opts) {
+				sent.push({ message, opts });
+			},
+		},
+		sent,
+		async emit(event, ctx) {
+			for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
+		},
+	};
+}
+
+/** One machine-readable line, aggregated into evidence/task-3-route.json by the task run. */
+function emitRoute(part, data) {
+	process.stdout.write(`DESK_ROUTE_EVIDENCE ${JSON.stringify({ part, ...data })}\n`);
+}
+
+/** A port that was open and is now closed, so an unexpected ensure would exit 3, not 1. */
+async function closedPort() {
+	const server = http.createServer(() => {});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address();
+	await new Promise((resolve) => server.close(resolve));
+	return port;
+}
+
+test("submit, revise, reply, close and pending carry an explicit --session and its file", async (t) => {
+	const ctx = await setup(t);
+	const file = "C:/qa/2026-10-05T15-52-31-471Z_sess-A.jsonl";
+	const dir = makeBoard(path.join(ctx.repo, "carry"));
+	const submitted = await runCli(ctx, ["submit", dir, "--title", "세션", "--session", "sess-A", "--session-file", file], { env: STRIP_SESSION });
+	assert.equal(submitted.code, 0, submitted.stderr);
+	const id = idOf(submitted);
+	assert.ok(submitted.stdout.includes("owner: sess-A"), submitted.stdout);
+
+	let detail = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	assert.equal(detail.summary.owner, "sess-A");
+	assert.deepEqual(detail.events.find((event) => event.type === "submitted").session, { id: "sess-A", file });
+
+	const jsonSubmit = await runCli(ctx, ["submit", dir, "--title", "세션", "--json", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(jsonSubmit.code, 0, jsonSubmit.stderr);
+	assert.ok(!/^owner: /m.test(jsonSubmit.stdout), jsonSubmit.stdout);
+	const parsed = JSON.parse(jsonSubmit.stdout);
+	assert.equal(parsed.summary.id, id);
+	assert.equal(parsed.summary.owner, "sess-A");
+	assert.equal(typeof parsed.url, "string");
+
+	const revised = await runCli(ctx, ["revise", id, dir, "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(revised.code, 0, revised.stderr);
+	assert.ok(revised.stdout.includes("owner: sess-A"), revised.stdout);
+
+	const fb = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 2, verdict: "change", comment: "다시" });
+	const fbBody = await fb.json();
+	assert.equal(fbBody.routed, "sess-A");
+	const here = async (session) => (await fetch(`${ctx.base}/api/here?cwd=${encodeURIComponent(ctx.repo)}&session=${encodeURIComponent(session)}`)).json();
+	assert.deepEqual((await here("probe-1")).noticeKeys, [`${id}:${fbBody.seq}`]);
+
+	const pending = await runCli(ctx, ["pending", "--session", "sess-A", "--json"], { env: STRIP_SESSION });
+	assert.equal(pending.code, 0, pending.stderr);
+	assert.deepEqual(JSON.parse(pending.stdout).noticeKeys, []);
+	assert.deepEqual((await here("probe-2")).noticeKeys, [], "pending --session marked A live, so A was queried");
+
+	const replied = await runCli(ctx, ["reply", id, "확인했습니다", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(replied.code, 0, replied.stderr);
+	const closed = await runCli(ctx, ["close", id, "완료", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(closed.code, 0, closed.stderr);
+	detail = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	for (const type of ["revised", "reply", "closed"]) {
+		assert.deepEqual(detail.events.find((event) => event.type === type).session, { id: "sess-A", file: null }, type);
+	}
+	emitRoute("cli", {
+		submit: { exit: submitted.code, owner: detail.summary.owner, id },
+		jsonSubmit: { exit: jsonSubmit.code, hasOwnerLine: /^owner: /m.test(jsonSubmit.stdout) },
+		revise: { exit: revised.code },
+		pending: { exit: pending.code, noticeKeys: JSON.parse(pending.stdout).noticeKeys },
+		reply: { exit: replied.code },
+		close: { exit: closed.code },
+		events: detail.events.map((event) => ({ type: event.type, session: event.session })),
+	});
+});
+
+test("an explicit session wins over stale env and the legacy fallbacks stay", async (t) => {
+	const ctx = await setup(t);
+	const explicitFile = "C:/qa/explicit.jsonl";
+
+	const aDir = makeBoard(path.join(ctx.repo, "stale-a"));
+	const a = await runCli(ctx, ["submit", aDir, "--title", "flag", "--session", "sess-A"], { env: { ...STALE_ENV } });
+	assert.equal(a.code, 0, a.stderr);
+	const aId = idOf(a);
+	assert.ok(a.stdout.includes("owner: sess-A"), a.stdout);
+	let detail = JSON.parse((await runCli(ctx, ["show", aId, "--json"])).stdout);
+	assert.equal(detail.summary.owner, "sess-A");
+	assert.deepEqual(detail.events.find((event) => event.type === "submitted").session, { id: "sess-A", file: null });
+	const proposal = JSON.parse(fs.readFileSync(path.join(ctx.home, "data", "proposals", aId, "proposal.json"), "utf8"));
+	assert.deepEqual(proposal.session, { id: "sess-A", file: null });
+
+	const fDir = makeBoard(path.join(ctx.repo, "stale-file"));
+	const f = await runCli(ctx, ["submit", fDir, "--title", "file", "--session-file", explicitFile], { env: { ...STALE_ENV } });
+	assert.equal(f.code, 0, f.stderr);
+	detail = JSON.parse((await runCli(ctx, ["show", idOf(f), "--json"])).stdout);
+	assert.equal(detail.summary.owner, "sess-B");
+	assert.deepEqual(detail.events.find((event) => event.type === "submitted").session, { id: "sess-B", file: explicitFile });
+
+	const eDir = makeBoard(path.join(ctx.repo, "stale-env"));
+	const e = await runCli(ctx, ["submit", eDir, "--title", "env"], { env: { ...STALE_ENV } });
+	assert.equal(e.code, 0, e.stderr);
+	const eId = idOf(e);
+	detail = JSON.parse((await runCli(ctx, ["show", eId, "--json"])).stdout);
+	assert.equal(detail.summary.owner, "sess-B");
+	assert.deepEqual(detail.events.find((event) => event.type === "submitted").session, { id: "sess-B", file: "C:/qa/stale-B.jsonl" });
+	const eRev = await runCli(ctx, ["revise", eId, eDir], { env: { ...STALE_ENV } });
+	assert.equal(eRev.code, 0, eRev.stderr);
+	detail = JSON.parse((await runCli(ctx, ["show", eId, "--json"])).stdout);
+	assert.deepEqual(detail.events.find((event) => event.type === "revised").session, { id: "sess-B", file: "C:/qa/stale-B.jsonl" });
+
+	const pDir = makeBoard(path.join(ctx.repo, "pi-fallback"));
+	const p = await runCli(ctx, ["submit", pDir, "--title", "pi"], { env: { DESK_SESSION: undefined, PI_SESSION_ID: "sess-C", PI_SESSION_FILE: "C:/qa/pi.jsonl" } });
+	assert.equal(p.code, 0, p.stderr);
+	const pId = idOf(p);
+	detail = JSON.parse((await runCli(ctx, ["show", pId, "--json"])).stdout);
+	assert.equal(detail.summary.owner, "sess-C");
+	assert.deepEqual(detail.events.find((event) => event.type === "submitted").session, { id: "sess-C", file: "C:/qa/pi.jsonl" });
+	const pRev = await runCli(ctx, ["revise", pId, pDir], { env: { DESK_SESSION: undefined, PI_SESSION_ID: "sess-C", PI_SESSION_FILE: undefined } });
+	assert.equal(pRev.code, 0, pRev.stderr);
+	detail = JSON.parse((await runCli(ctx, ["show", pId, "--json"])).stdout);
+	assert.deepEqual(detail.events.find((event) => event.type === "revised").session, { id: "sess-C", file: null });
+});
+
+test("a missing, blank or option-like session value is a usage error before ensure", async (t) => {
+	const ctx = await setup(t);
+	const dir = makeBoard(path.join(ctx.repo, "usage"));
+	const id = idOf(await runCli(ctx, ["submit", dir, "--title", "사용법"]));
+	const before = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	const port = await closedPort();
+	const closed = { DESK_URL: `http://127.0.0.1:${port}` };
+	const bad = [
+		["--session"],
+		["--session", ""],
+		["--session", "   "],
+		["--session", "--note", "x"],
+		["--session-file"],
+		["--session-file", ""],
+		["--session-file", "--new"],
+	];
+	const commands = {
+		submit: [dir, "--title", "사용법2"],
+		revise: [id, dir],
+		reply: [id, "안녕"],
+		close: [id, "완료"],
+		pending: [],
+	};
+	for (const [command, baseArgs] of Object.entries(commands)) {
+		for (const tokens of bad) {
+			const result = await runCli(ctx, [command, ...baseArgs, ...tokens], { env: closed });
+			assert.equal(result.code, 1, `${command} ${tokens.join(" ")}: ${result.stdout}${result.stderr}`);
+			assert.ok(!result.stderr.includes("server unreachable"), `${command} ${tokens.join(" ")}: ensure ran`);
+		}
+	}
+	const after = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	assert.equal(after.events.length, before.events.length, "no event changed");
+	const list = JSON.parse((await runCli(ctx, ["list", "--json"])).stdout);
+	assert.equal(list.items.length, 1, "no proposal was created");
+});
+
+test("a stripped environment leaves the board ownerless until an explicit session binds it", async (t) => {
+	const ctx = await setup(t);
+	const dir = makeBoard(path.join(ctx.repo, "ownerless"));
+	const first = await runCli(ctx, ["submit", dir, "--title", "주인 없음"], { env: STRIP_SESSION });
+	assert.equal(first.code, 0, first.stderr);
+	const id = idOf(first);
+	assert.ok(first.stdout.includes("owner: none"), first.stdout);
+
+	const fb = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "봐 주세요" });
+	assert.equal(fb.status, 200);
+	const fbBody = await fb.json();
+	assert.equal(fbBody.routed, null);
+	assert.equal(fbBody.delivery, "none");
+	assert.ok(!fs.existsSync(path.join(ctx.home, "inbox")), "no inbox for an ownerless route");
+
+	const before = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	const again = await runCli(ctx, ["submit", dir, "--title", "주인 없음", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(again.code, 0, again.stderr);
+	assert.equal(idOf(again), id);
+	assert.ok(again.stdout.includes("note: already submitted"), again.stdout);
+	assert.ok(again.stdout.includes("owner: none"), again.stdout);
+	const after = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	assert.equal(after.summary.rev, before.summary.rev);
+	assert.equal(after.events.length, before.events.length);
+	assert.equal(after.summary.owner, before.summary.owner);
+	assert.equal(after.summary.owner, null);
+	assert.notEqual(after.summary.owner, "sess-A");
+
+	const rev = await runCli(ctx, ["revise", id, dir, "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(rev.code, 0, rev.stderr);
+	assert.ok(rev.stdout.includes("owner: sess-A"), rev.stdout);
+	const bound = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	assert.equal(bound.summary.rev, before.summary.rev + 1);
+	assert.equal(bound.events.length, before.events.length + 1);
+	assert.equal(bound.summary.owner, "sess-A");
+	assert.deepEqual(bound.events.find((event) => event.type === "revised").session, { id: "sess-A", file: null });
+});
+
+test("real CLI, real server and real inbox: one followUp, dedupe and the status gate", async (t) => {
+	const ctx = await setup(t);
+	const dir = makeBoard(path.join(ctx.repo, "roundtrip"));
+	const submitted = await runCli(ctx, ["submit", dir, "--title", "왕복", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(submitted.code, 0, submitted.stderr);
+	const id = idOf(submitted);
+	assert.ok(submitted.stdout.includes("owner: sess-A"), submitted.stdout);
+
+	const fb = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "qa-roundtrip" });
+	assert.equal(fb.status, 200);
+	const fbBody = await fb.json();
+	assert.equal(fbBody.routed, "sess-A");
+	assert.equal(fbBody.delivery, "pending");
+	const seq = fbBody.seq;
+	const inboxDir = path.join(ctx.home, "inbox", "sess-A");
+	const inboxFile = path.join(inboxDir, `${id}-${String(seq).padStart(6, "0")}.json`);
+	assert.ok(fs.existsSync(inboxFile), "the server wrote A's inbox file");
+	assert.deepEqual(fs.readdirSync(path.join(ctx.home, "inbox")), ["sess-A"], "only A's inbox");
+	const payload = fs.readFileSync(inboxFile, "utf8");
+
+	const fp = fakePi();
+	const timers = [];
+	const handle = createDesk(fp.pi, {
+		env: { DESK_URL: ctx.base, OMO_DESK_HOME: ctx.home },
+		home: ctx.home,
+		timer: {
+			setInterval: (fn, ms) => {
+				const entry = { fn, ms };
+				timers.push(entry);
+				return entry;
+			},
+			clearInterval: (entry) => {
+				const at = timers.indexOf(entry);
+				if (at >= 0) timers.splice(at, 1);
+			},
+		},
+		spawn: () => ({ unref() {} }),
+	});
+	t.after(() => handle.stop());
+	const hostCtx = { cwd: ctx.repo, hasUI: false, sessionManager: { getSessionId: () => "sess-A" } };
+	const followUps = () => fp.sent.filter((entry) => entry.opts && entry.opts.deliverAs === "followUp");
+
+	await fp.emit("session_start", hostCtx);
+	assert.equal(followUps().length, 0, "session_start alone delivers no followUp");
+	await handle.inbox();
+	assert.equal(followUps().length, 1, "exactly one followUp");
+	assert.equal(followUps()[0].message.content, JSON.parse(payload).text);
+	assert.deepEqual(followUps()[0].message.details, { proposalId: id, seq });
+	assert.equal(followUps()[0].opts.triggerTurn, true);
+	assert.ok(!fs.existsSync(inboxFile), "the drained file is removed");
+
+	fs.mkdirSync(inboxDir, { recursive: true });
+	fs.writeFileSync(inboxFile, payload);
+	await handle.inbox();
+	assert.equal(followUps().length, 1, "the delivered payload is not delivered again");
+	assert.ok(!fs.existsSync(inboxFile), "the duplicate file is removed");
+
+	const second = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "second" });
+	const secondSeq = (await second.json()).seq;
+	const secondFile = path.join(inboxDir, `${id}-${String(secondSeq).padStart(6, "0")}.json`);
+	const reply = await runCli(ctx, ["reply", id, "다시 볼게요", "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(reply.code, 0, reply.stderr);
+	const detail = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	assert.equal(detail.summary.status, "mine");
+	assert.ok(fs.existsSync(secondFile), "the second feedback is still waiting in the inbox");
+	await handle.inbox();
+	assert.equal(followUps().length, 1, "a payload the server calls mine is dropped");
+	assert.ok(!fs.existsSync(secondFile), "the dropped file is removed");
+	const afterDrain = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
+	const secondEvent = afterDrain.events.find((event) => event.type === "feedback" && event.seq === secondSeq);
+	assert.equal(secondEvent.delivery, "delivered", "the API reports the dropped feedback as delivered");
+
+	assert.ok(timers.length > 0, "the extension registered its timers");
+	handle.stop();
+	assert.equal(timers.length, 0, "teardown clears the extension timers");
+	emitRoute("integration", {
+		submit: { exit: submitted.code, owner: detail.summary.owner, id },
+		feedback: { status: fb.status, routed: fbBody.routed, delivery: fbBody.delivery, seq },
+		followUp: { count: followUps().length, details: followUps()[0].message.details, triggerTurn: followUps()[0].opts.triggerTurn },
+		statusGate: { replyExit: reply.code, status: detail.summary.status, followUpCount: followUps().length },
+		teardown: { timers: timers.length },
+	});
+});
+
+test("pending --session identifies the caller, so a never-seen session still gets the notice", async (t) => {
+	const ctx = await setup(t);
+	const dir = makeBoard(path.join(ctx.repo, "notice"));
+	const id = idOf(await runCli(ctx, ["submit", dir, "--title", "알림", "--session", "sess-A"], { env: STRIP_SESSION }));
+	const fb = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "확인 필요" });
+	const seq = (await fb.json()).seq;
+
+	const never = await runCli(ctx, ["pending", "--session", "never-seen-B", "--json"], { env: STRIP_SESSION });
+	assert.equal(never.code, 0, never.stderr);
+	assert.deepEqual(JSON.parse(never.stdout).noticeKeys, [`${id}:${seq}`]);
+
+	const mine = await runCli(ctx, ["pending", "--session", "sess-A", "--json"], { env: STRIP_SESSION });
+	assert.equal(mine.code, 0, mine.stderr);
+	assert.deepEqual(JSON.parse(mine.stdout).noticeKeys, []);
 });

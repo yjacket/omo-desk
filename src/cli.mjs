@@ -13,19 +13,19 @@ const CLI = `node "${String(process.argv[1] ?? "desk.mjs").replace(/\\/g, "/")}"
 
 const USAGE = [
 	`usage: ${CLI} <command> [--json]`,
-	"  submit <boardDir> [--title t] [--note n] [--new]",
-	"  revise <id> <boardDir> [--note n]",
-	"  reply <id> <text...> | --file <path> | -",
-	"  close <id> <summary...>",
+	"  submit <boardDir> [--title t] [--note n] [--new] [--session id] [--session-file path]",
+	"  revise <id> <boardDir> [--note n] [--session id] [--session-file path]",
+	"  reply <id> <text...> | --file <path> | - [--session id] [--session-file path]",
+	"  close <id> <summary...> [--session id] [--session-file path]",
 	"  show <id>",
 	"  list [--product p] [--feature f] [--status s]",
-	"  pending",
+	"  pending [--session id] [--session-file path]",
 	"  wait <id> [--timeout sec]",
 	"  server status|start|stop|restart",
 	"  install [--no-tailscale] [--no-autostart] | uninstall | doctor",
 ].join("\n");
 
-const VALUE_FLAGS = new Set(["title", "note", "file", "timeout", "product", "feature", "status"]);
+const VALUE_FLAGS = new Set(["title", "note", "file", "timeout", "product", "feature", "status", "session", "session-file"]);
 
 function out(line) {
 	process.stdout.write(line + "\n");
@@ -50,8 +50,25 @@ function parse(rest) {
 	return { flags, pos };
 }
 
-function sessionOf(env) {
-	return { id: env.DESK_SESSION || env.PI_SESSION_ID || null, file: env.PI_SESSION_FILE || null };
+/**
+ * The CLI's single ownership resolver. An explicit option wins over both env vars; an ID-only
+ * option records the file as null, and a --session-file value is recorded exactly as given
+ * (never read or inferred). A missing, blank or option-like value is a usage error.
+ */
+function sessionOf(env, flags = new Map()) {
+	const option = (name) => {
+		if (!flags.has(name)) return undefined;
+		const value = flags.get(name);
+		if (typeof value !== "string" || value.trim() === "" || value.startsWith("--")) {
+			throw new Error(`usage: --${name} needs a value`);
+		}
+		return value;
+	};
+	const idFlag = option("session");
+	const fileFlag = option("session-file");
+	const id = idFlag !== undefined ? idFlag : env.DESK_SESSION || env.PI_SESSION_ID || null;
+	const file = fileFlag !== undefined ? fileFlag : idFlag !== undefined ? null : env.PI_SESSION_FILE || null;
+	return { id: id || null, file: file || null };
 }
 
 async function call(method, route, body, env) {
@@ -102,15 +119,17 @@ async function cmdSubmit(rest, json) {
 		return 1;
 	}
 	const env = process.env;
+	const session = sessionOf(env, flags);
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
 	const srcDir = path.resolve(boardDir);
+	const identity = await identityFor(process.cwd());
 	const res = await call(
 		"POST",
 		"/api/proposals",
 		{
 			cwd: process.cwd(),
-			identity: await identityFor(process.cwd()),
+			identity: { ...identity, session },
 			title: flags.get("title") ?? null,
 			srcDir,
 			note: flags.get("note") ?? null,
@@ -125,6 +144,7 @@ async function cmdSubmit(rest, json) {
 		}
 		out(`id: ${res.json.summary.id}`);
 		out(`url: ${res.json.url}`);
+		out(`owner: ${res.json.summary.owner ?? "none"}`);
 		if (res.json.existing) out("note: already submitted");
 		return 0;
 	}
@@ -149,12 +169,13 @@ async function cmdRevise(rest, json) {
 		return 1;
 	}
 	const env = process.env;
+	const session = sessionOf(env, flags);
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
 	const res = await call(
 		"POST",
 		`/api/p/${encodeURIComponent(id)}/revise`,
-		{ srcDir: path.resolve(boardDir), note: flags.get("note") ?? null, session: sessionOf(env) },
+		{ srcDir: path.resolve(boardDir), note: flags.get("note") ?? null, session },
 		env,
 	);
 	if (res.status === 200) {
@@ -165,6 +186,7 @@ async function cmdRevise(rest, json) {
 		out(`id: ${res.json.summary.id}`);
 		out(`rev: ${res.json.summary.rev}`);
 		out(`url: ${res.json.url}`);
+		out(`owner: ${res.json.summary.owner ?? "none"}`);
 		return 0;
 	}
 	if (res.status === 400 && res.json && res.json.error === "invalid_board") {
@@ -189,9 +211,10 @@ async function cmdReply(rest, json) {
 	}
 	const text = replyText(flags, pos);
 	const env = process.env;
+	const session = sessionOf(env, flags);
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
-	const res = await call("POST", `/api/p/${encodeURIComponent(id)}/reply`, { text, session: sessionOf(env) }, env);
+	const res = await call("POST", `/api/p/${encodeURIComponent(id)}/reply`, { text, session }, env);
 	if (res.status === 200) {
 		if (json) {
 			out(JSON.stringify(res.json));
@@ -210,17 +233,18 @@ function recordDate() {
 }
 
 async function cmdClose(rest, json) {
-	const { pos } = parse(rest);
+	const { flags, pos } = parse(rest);
 	const id = pos[0];
 	if (!id) {
 		err(`usage: ${CLI} close <id> <summary...>`);
 		return 1;
 	}
 	const env = process.env;
+	const session = sessionOf(env, flags);
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
 	const summary = pos.slice(1).join(" ");
-	const res = await call("POST", `/api/p/${encodeURIComponent(id)}/close`, { summary, session: sessionOf(env) }, env);
+	const res = await call("POST", `/api/p/${encodeURIComponent(id)}/close`, { summary, session }, env);
 	if (res.status === 200) {
 		if (json) {
 			out(JSON.stringify(res.json));
@@ -297,12 +321,13 @@ async function cmdList(rest, json) {
 }
 
 async function cmdPending(rest, json) {
+	const { flags } = parse(rest);
 	const env = process.env;
+	const session = sessionOf(env, flags);
 	const ensured = await ensureOk(env);
 	if (ensured) return ensured;
-	const session = process.env.DESK_SESSION || process.env.PI_SESSION_ID || null;
 	const query = new URLSearchParams({ cwd: process.cwd() });
-	if (session) query.set("session", session);
+	if (session.id) query.set("session", session.id);
 	const res = await call("GET", `/api/here?${query}`, null, env);
 	if (res.status !== 200) return mapError(res);
 	if (json) {
