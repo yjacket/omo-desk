@@ -220,6 +220,29 @@ test("show of an unknown proposal exits 4", async (t) => {
 	assert.equal(result.code, 4, result.stdout);
 });
 
+test("show labels a report board's ack and revised tab", async (t) => {
+	const ctx = await setup(t);
+	const dir = path.join(ctx.repo, "report");
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(
+		path.join(dir, "board.json"),
+		JSON.stringify({ title: "보고서", kind: "report", sections: [{ title: "결과", cards: [{ title: "끝", frames: [["완료", "screen.svg"]] }] }] }),
+	);
+	fs.writeFileSync(path.join(dir, "screen.svg"), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+	const id = idOf(await runCli(ctx, ["submit", dir, "--title", "보고서"]));
+
+	const feedback = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "ack", comment: "확인했습니다" });
+	assert.equal(feedback.status, 200, `feedback rejected: ${await feedback.text()}`);
+
+	const show = await runCli(ctx, ["show", id]);
+	assert.equal(show.code, 0, show.stderr);
+	assert.ok(show.stdout.includes("ack"), show.stdout);
+	assert.ok(show.stdout.includes("갱신 1"), show.stdout);
+	assert.ok(show.stdout.includes("report"), show.stdout);
+	assert.ok(!show.stdout.includes("1안"), show.stdout);
+	assert.ok(!show.stdout.includes("change"), show.stdout);
+});
+
 test("resubmitting identical content notes it, changed content is exit 8, --new forces a new id", async (t) => {
 	const ctx = await setup(t);
 	const dir = makeBoard(path.join(ctx.repo, "dup"));

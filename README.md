@@ -66,7 +66,7 @@ The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니�
 | `revise <id> <boardDir> [--note n] [--session id] [--session-file path]` | `id: <id>` `rev: <n>` `url: <url>` `owner: <id>` or `owner: none` | 0; 1; 2; 3; 4 not found; 5 closed |
 | `reply <id> <text...>` (or `--file <path>`, or `-` = stdin) `[--session id] [--session-file path]` | `ok <id> <status>` | 0; 1; 3; 4; 5 |
 | `close <id> <summary...> [--session id] [--session-file path]` | `ok <id> closed`, then `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>` when the latest feedback verdict is approve, else `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 1; 3; 4; 5 |
-| `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, then one block per event | 0; 3; 4 |
+| `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, then one block per event (a report board reads `<status> 갱신 <n> report` and its `feedback` block reads `ack`) | 0; 3; 4 |
 | `list [--product p] [--feature f] [--status s]` | `<id>\t<status>\t<product.name>\t<branch>\t<title>` per item | 0; 3 |
 | `pending [--session id] [--session-file path]` | the pending notice text, or `none` | 0; 1; 3 |
 | `wait <id> [--timeout sec]` | `WAITING <id>`; then `FEEDBACK <id> <seq>` + the feedback message, or `CLOSED <id>` | 0; 4; 6 timeout |

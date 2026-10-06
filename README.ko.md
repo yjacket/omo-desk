@@ -66,7 +66,7 @@ checkout 에서:
 | `revise <id> <boardDir> [--note n] [--session id] [--session-file path]` | `id: <id>` `rev: <n>` `url: <url>` `owner: <id>` 또는 `owner: none` | 0; 1; 2; 3; 4 없음; 5 닫힘 |
 | `reply <id> <text...>` (또는 `--file <path>`, `-` = stdin) `[--session id] [--session-file path]` | `ok <id> <status>` | 0; 1; 3; 4; 5 |
 | `close <id> <summary...> [--session id] [--session-file path]` | `ok <id> closed`, 이어서 마지막 의견이 승인이면 `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>`, 아니면 `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 1; 3; 4; 5 |
-| `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, 이벤트마다 한 블록 | 0; 3; 4 |
+| `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, 이벤트마다 한 블록 (보고 보드는 `<status> 갱신 <n> report` 로 읽고, `feedback` 블록은 `ack` 로 읽습니다) | 0; 3; 4 |
 | `list [--product p] [--feature f] [--status s]` | 항목마다 `<id>\t<status>\t<product.name>\t<branch>\t<title>` | 0; 3 |
 | `pending [--session id] [--session-file path]` | 대기 알림 문구 또는 `none` | 0; 1; 3 |
 | `wait <id> [--timeout sec]` | `WAITING <id>`, 이어서 `FEEDBACK <id> <seq>` + 의견 메시지, 또는 `CLOSED <id>` | 0; 4; 6 시간 초과 |

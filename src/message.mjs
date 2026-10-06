@@ -11,10 +11,14 @@ const answerLine = (board, answers) => {
 		.join("; ");
 };
 
+const revLabel = (summary, rev) => (summary?.kind === "report" ? `갱신 ${rev}` : `${rev}안`);
+
+const verdictLabel = (verdict) => (verdict === "approve" ? "승인" : verdict === "ack" ? "확인" : "재요청");
+
 export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 	const lines = [
-		`[omo-desk] 의견이 왔습니다: ${summary.title} (${summary.id}, ${event.rev}안, #${event.seq})`,
-		`판단: ${event.verdict === "approve" ? "승인" : "재요청"}`,
+		`[omo-desk] 의견이 왔습니다: ${summary.title} (${summary.id}, ${revLabel(summary, event.rev)}, #${event.seq})`,
+		`판단: ${verdictLabel(event.verdict)}`,
 	];
 	const answers = answerLine(board, event.answers);
 	if (answers) lines.push(`답: ${answers}`);
@@ -26,7 +30,7 @@ export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 		lines.push(line);
 	}
 	if (event.rev < summary.rev) {
-		lines.push(`현재 안은 ${summary.rev}안입니다 (이 의견은 ${event.rev}안 기준)`);
+		lines.push(`현재 안은 ${revLabel(summary, summary.rev)}입니다 (이 의견은 ${revLabel(summary, event.rev)} 기준)`);
 	}
 	if (url) lines.push(`보기: ${url}`);
 	lines.push(`처리: ${cli} show ${summary.id} 로 전체를 읽고 ${cli} reply / revise / close 로 답하세요.`);

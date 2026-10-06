@@ -265,7 +265,8 @@ async function cmdClose(rest, json) {
 function eventBlock(event) {
 	const head = `#${event.seq} ${event.type} ${event.at ?? ""}`;
 	if (event.type === "feedback") {
-		const lines = [`${head} ${event.verdict === "approve" ? "approve" : "change"}`];
+		const verdict = event.verdict === "approve" ? "approve" : event.verdict === "ack" ? "ack" : "change";
+		const lines = [`${head} ${verdict}`];
 		if (event.comment) lines.push(`  ${event.comment}`);
 		return lines.join("\n");
 	}
@@ -291,7 +292,11 @@ async function cmdShow(rest, json) {
 		out(JSON.stringify(res.json));
 		return 0;
 	}
-	out(`${res.json.proposal.title} (${res.json.summary.id}) ${res.json.summary.status} ${res.json.summary.rev}안`);
+	const summary = res.json.summary;
+	const chip = summary.kind === "report"
+		? `${summary.status} 갱신 ${summary.rev} report`
+		: `${summary.status} ${summary.rev}안`;
+	out(`${res.json.proposal.title} (${summary.id}) ${chip}`);
 	out(`url: ${res.json.url}`);
 	for (const event of res.json.events) out(eventBlock(event));
 	return 0;

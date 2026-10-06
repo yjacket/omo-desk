@@ -167,6 +167,21 @@ test("the 처리 line embeds the given cli prefix verbatim", () => {
 	assert.ok(text.endsWith(`${other} show 240101-abcd 로 전체를 읽고 ${other} reply / revise / close 로 답하세요.`));
 });
 
+test("an ack on a report board reads 확인 and labels the revision as an update", () => {
+	const text = feedbackMessage({
+		summary: { ...summary, kind: "report", rev: 1 },
+		board: { questions: [] },
+		event: { seq: 2, rev: 1, verdict: "ack", comment: "QA 확인 의견", answers: {}, marks: [] },
+		url: URL,
+		cropDir: CROPS,
+		cli: CLI,
+	});
+	assert.ok(text.includes("판단: 확인"), text);
+	assert.ok(text.includes("갱신 1"), text);
+	assert.equal(text.includes("1안"), false);
+	assert.equal(text.includes("재요청"), false);
+});
+
 test("pendingNotice returns null for an empty list", () => {
 	assert.equal(pendingNotice([], CLI), null);
 });
