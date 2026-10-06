@@ -62,13 +62,13 @@ The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니�
 
 | Command | Human stdout | Exit |
 | --- | --- | --- |
-| `submit <boardDir> [--title t] [--note n] [--new]` | `id: <id>`, `url: <url>` (plus `note: already submitted` when the server returned `existing`) | 0; 2 invalid board (each error on stderr); 3 server unreachable; 8 duplicate open proposal with different content |
-| `revise <id> <boardDir> [--note n]` | `id: <id>` `rev: <n>` `url: <url>` | 0; 2; 3; 4 not found; 5 closed |
-| `reply <id> <text...>` (or `--file <path>`, or `-` = stdin) | `ok <id> <status>` | 0; 3; 4; 5 |
-| `close <id> <summary...>` | `ok <id> closed`, then `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>` when the latest feedback verdict is approve, else `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 3; 4; 5 |
+| `submit <boardDir> [--title t] [--note n] [--new] [--session id] [--session-file path]` | `id: <id>`, `url: <url>`, `owner: <id>` or `owner: none` (plus `note: already submitted` when the server returned `existing`) | 0; 1 usage error; 2 invalid board (each error on stderr); 3 server unreachable; 8 duplicate open proposal with different content |
+| `revise <id> <boardDir> [--note n] [--session id] [--session-file path]` | `id: <id>` `rev: <n>` `url: <url>` `owner: <id>` or `owner: none` | 0; 1; 2; 3; 4 not found; 5 closed |
+| `reply <id> <text...>` (or `--file <path>`, or `-` = stdin) `[--session id] [--session-file path]` | `ok <id> <status>` | 0; 1; 3; 4; 5 |
+| `close <id> <summary...> [--session id] [--session-file path]` | `ok <id> closed`, then `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>` when the latest feedback verdict is approve, else `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 1; 3; 4; 5 |
 | `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, then one block per event | 0; 3; 4 |
 | `list [--product p] [--feature f] [--status s]` | `<id>\t<status>\t<product.name>\t<branch>\t<title>` per item | 0; 3 |
-| `pending` | the pending notice text, or `none` | 0; 3 |
+| `pending [--session id] [--session-file path]` | the pending notice text, or `none` | 0; 1; 3 |
 | `wait <id> [--timeout sec]` | `WAITING <id>`; then `FEEDBACK <id> <seq>` + the feedback message, or `CLOSED <id>` | 0; 4; 6 timeout |
 | `server status\|start\|stop\|restart` | `running pid=<pid> port=<port> version=<v>` or `stopped` | 0; 7 stopped (status) |
 | `install [--no-tailscale] [--no-autostart]`, `uninstall`, `doctor` | `<step>: <result>` lines | 0 ok; 1 any failed |
@@ -76,6 +76,10 @@ The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니�
 Exit 8 prints `open proposal exists: <id> <url> - use: desk revise <id> <boardDir>, or desk submit --new` on stderr.
 
 `submit` and `revise` send the absolute board dir and the identity of the current directory; the server validates. Before talking to the server the CLI runs `ensure`: GET `/api/health` (1500 ms timeout). A foreign answer exits 3. On a version mismatch the CLI restarts the server (`/api/shutdown`, then a relaunch) only when the installed app's version equals the CLI's. Otherwise it warns `server version <x> differs from cli <y>; run install to update` and keeps using the running server. No answer launches the server, then up to 20 health checks. `DESK_URL` overrides the base URL, `DESK_NO_ENSURE=1` skips launching, `DESK_WAIT_POLL_MS` (default 2000) and `DESK_ENSURE_POLL_MS` (default 500) set poll intervals.
+
+Caller identity. `--session <id>` and `--session-file <path>` name the calling session explicitly. The session ID resolves as: explicit `--session` > `DESK_SESSION` > `PI_SESSION_ID` > null. Without either option the env behavior is unchanged. `--session` alone records the file as null; `--session-file` is recorded exactly as given, and alone it keeps the ID resolution above. Paths are never read or inferred. A missing or blank value, or a value that starts with `--` (it would eat the next option), is a usage error: exit 1, checked before `ensure` and before any network call. Other option parsing, unknown options and accepted ID formats don't change. `sessionOf` is the CLI's single ownership resolution point: `submit` sends it as `identity.session`, `revise`, `reply` and `close` send it as `session`, `pending` queries with it. `submit` and `revise` print `owner:` from the server's `summary.owner`; `--json` output is unchanged.
+
+Ownership. An unchanged resubmit (same hash, `existing`) keeps the existing owner, revision and event count, even when it's ownerless. An explicit `revise` from another session may move ownership; nothing takes it over automatically. Manual use without any session stays allowed and leaves the board ownerless. Env vars don't always cross process boundaries (a monitor lane or a stripped shell may lose `DESK_SESSION`), so agents in such lanes pass `--session` themselves. `pending --session <id>` calls `/api/here` with that id, so it also counts that session as live (a session is live when it called `/api/here` within 90 s). The cwd identity is still the existing product key (`dir/<name>` without a remote). Source changes reach real sessions only after the installed copy is updated (`desk install`, then `/reload` or restart).
 
 On Windows the server is created through `Win32_Process.Create` (PowerShell, hidden) so it outlives the caller's terminal. If WMI fails, or any env key starts with `OMO_DESK_` or `DESK_`, it falls back to a detached `spawn`.
 
@@ -91,8 +95,11 @@ A board is a folder with `board.json` (schema `visual-board/1`) and the files it
               frames: [[label, path], ...] (>= 1) }] }],
   questions?: [{ id: /^[A-Za-z0-9_-]{1,40}$/ unique, text, help?,
     options: [{ value: /^[A-Za-z0-9_.-]{1,60}$/ unique in the question, label, rec?: boolean, why? }] (>= 2) }],
-  commentPlaceholder?: string }
+  commentPlaceholder?: string,
+  kind?: 'decision'|'report' }
 ```
+
+- `kind` is `decision` when absent. Any other value is an error naming `kind`. A `report` board is a question-less completion report: any `questions` entry makes it invalid, with an error naming `questions`.
 
 - Strict: any other key is an error. The prototype's top-level `id` is ignored and `sideSession` (string) shows as a gray note above `정할 것`.
 - Frame labels are unique across the whole board; marks reference frames by label.
@@ -113,6 +120,8 @@ See `skill/example/` for a working board.
 - Boxes of this frame are drawn in the viewer. Tap one to select it; a new box starts selected. The bottom of the viewer then shows its number, a comment field and `지우기`. The comment is the same one the `표시한 곳` list shows, and `지우기` removes the box everywhere. Tap outside the box to put the sheet away. When the on-screen keyboard opens, the sheet moves above it.
 - On a past revision or a closed proposal the viewer still opens for zoom and pan, but has no `표시하기` and no sheet.
 - `재요청` sends your answers, comment and boxes and asks the session for a revised board; it needs at least one of them. `승인` sends the same and approves the proposal: the session does the work without showing it again and closes it. Only an approval is tagged in the conversation. Both buttons lock on the first press, so one press sends once; a successful send goes back to the inbox, a failed one stays on the page with the reason. There is no close button: the session closes the proposal with `desk close` when the work is done.
+- Report boards (`kind: report`) show one `확인` button instead of `재요청` and `승인`. It sends verdict `ack` with your comment and boxes. The header shows a `보고` chip, revision tabs, event tags and the new-revision banner read `갱신 n` instead of `n안`, and the `정할 것` card reads `확인` with no questions. A summary without `kind` renders as a decision board.
+- The inbox shows a `보고` chip and `갱신 n` on report boards, a `보고 N` count, and groups open report boards under their own heading after the decision boards.
 - Close with `닫기`, Esc or the phone's back gesture. The viewer is one history entry, so back closes it and the page stays where it was.
 - `듣기` next to the title reads the open revision aloud with the device's own voice (Web Speech `speechSynthesis`, Korean). Order: the session's reply when it is the newest event; on a revised proposal, what changed (the revise note); the title; the lead; each section title, then each card's title and its `say` (else its note); each question with its options, saying which one is recommended and its `why`; then `여기까지입니다`. While it reads, the button says `멈추기` and a floating `멈추기` at the bottom left stays on screen as the page scrolls; the card being read is outlined and scrolled into view. Switching revision stops it.
 - To answer by voice, use the phone keyboard's microphone in `전체 의견`. One comment can answer every question.
@@ -123,7 +132,7 @@ See `skill/example/` for a working board.
 <home>/
   app/                 installed copy of the repo
   data/proposals/<id>/ the record (the server is its only writer)
-    proposal.json      { v: 1, id, title, created, product, feature, session }, written once and last
+    proposal.json      { v: 1, id, title, created, product, feature, session, kind }, written once and last
     revs/<n>/...       copied board files per revision
     events/<seq6>-<type>.json
     crops/<seq6>-<n>.png
@@ -137,8 +146,10 @@ See `skill/example/` for a working board.
 - Events: `submitted`, `feedback`, `reply`, `revised`, `closed`, numbered from 1 and never reused. `submitted` and `revised` carry a content `hash`.
 - Status: any `closed` gives `closed`; otherwise a last `feedback` gives `theirs` (your feedback is waiting on the session, `approved` if the verdict was approve); otherwise `mine` (waiting on you).
 - Owner is the session id of the latest event that has one.
+- `kind` is written to `proposal.json` at submit and shown as `kind` in every summary; records without it read as `decision`. A revise keeps the kind; a revise whose board has a different kind is 400 `bad_input`.
+- Verdicts: `change` and `approve` on decision boards, `ack` on report boards only (optional comment and marks, no answers). Any other pairing is 400 `bad_input`. An `ack` without comment and marks writes the feedback event, then a `closed` event `{ by: "user", summary: null }` in the same call, and writes no inbox file. Its feedback `delivery` is `none` because there is nothing to deliver. An `ack` with a comment or a mark writes only the feedback event: status becomes `theirs`, it's routed and delivered through the usual inbox and pending-notice path, and the owning or next session closes it with `desk close`.
 - Submitting the same feature + title again while open returns the existing proposal when the content hash matches, otherwise exit 8. `--new` always creates.
-- Feedback `delivery` is computed: `none` (no owner, or the inbox write failed: the event is stored, the server retried once and logged it), `pending` (inbox file present), `delivered`.
+- Feedback `delivery` is computed: `none` (no owner, nothing to deliver (an `ack` without comment and marks), or the inbox write failed: the event is stored, the server retried once and logged it), `pending` (inbox file present), `delivered`.
 - Product key comes from the normalized `origin` remote (lowercased `host/path`), feature key is `<product key>#<branch>`, and the worktree path scopes counts and notices.
 
 `config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json` is written only by the server: `{ "v", "name", "port", "pid", "started", "version" }`. Install doesn't write it.
@@ -156,9 +167,9 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | file; traversal -> 403 |
 | GET | `/api/health` | read | `{ ok, name: 'omo-desk', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
-| GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts = unfiltered `{ mine, theirs, closed }`) |
+| GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts = unfiltered `{ mine, theirs, closed, reports }`; `reports` = open report boards) |
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
-| POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
+| POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }`; verdict `change`, `approve` or `ack` (see Data layout) |
 | GET | `/api/push/key` | read | `{ publicKey }` (VAPID, base64url) |
 | POST | `/api/push/subscribe` | feedback | `{ ok }`, then a welcome push to that browser |
 | POST | `/api/push/unsubscribe` | feedback | `{ ok }` |
@@ -205,7 +216,9 @@ The senpi extension (`extension/omo-desk.ts`) does nothing in child or task-memb
 - On shutdown it calls `/api/bye` so the owner counts as gone at once.
 - After `/reload` the replaced copy of the extension stops its timers the first time senpi reports its generation as stale, so only the current copy polls and wakes the session.
 
-Session ids come from `DESK_SESSION` or `PI_SESSION_ID`.
+Session ids come from `DESK_SESSION` or `PI_SESSION_ID`. The extension isn't changed by board kinds: it already delivers `theirs` boards, including a report acked with a comment.
+
+Two paths differ. The inbox follow-up is automatic: it starts a turn in the owning session. The pending notice (`desk pending`, `/api/here`) is passive: it only tells a session that feedback is waiting, so an ownerless board is seen but never delivered as a turn.
 
 ## Notifications
 

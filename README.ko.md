@@ -62,13 +62,13 @@ checkout 에서:
 
 | 명령 | 출력 | 종료 코드 |
 | --- | --- | --- |
-| `submit <boardDir> [--title t] [--note n] [--new]` | `id: <id>`, `url: <url>` (서버가 `existing` 을 주면 `note: already submitted` 추가) | 0; 2 잘못된 보드(오류는 stderr); 3 서버 연결 불가; 8 내용이 다른 열린 기획안 중복 |
-| `revise <id> <boardDir> [--note n]` | `id: <id>` `rev: <n>` `url: <url>` | 0; 2; 3; 4 없음; 5 닫힘 |
-| `reply <id> <text...>` (또는 `--file <path>`, `-` = stdin) | `ok <id> <status>` | 0; 3; 4; 5 |
-| `close <id> <summary...>` | `ok <id> closed`, 이어서 마지막 의견이 승인이면 `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>`, 아니면 `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 3; 4; 5 |
+| `submit <boardDir> [--title t] [--note n] [--new] [--session id] [--session-file path]` | `id: <id>`, `url: <url>`, `owner: <id>` 또는 `owner: none` (서버가 `existing` 을 주면 `note: already submitted` 추가) | 0; 1 사용법 오류; 2 잘못된 보드(오류는 stderr); 3 서버 연결 불가; 8 내용이 다른 열린 기획안 중복 |
+| `revise <id> <boardDir> [--note n] [--session id] [--session-file path]` | `id: <id>` `rev: <n>` `url: <url>` `owner: <id>` 또는 `owner: none` | 0; 1; 2; 3; 4 없음; 5 닫힘 |
+| `reply <id> <text...>` (또는 `--file <path>`, `-` = stdin) `[--session id] [--session-file path]` | `ok <id> <status>` | 0; 1; 3; 4; 5 |
+| `close <id> <summary...> [--session id] [--session-file path]` | `ok <id> closed`, 이어서 마지막 의견이 승인이면 `record: VISUAL-APPROVED <YYYY-MM-DD> <id> <url>`, 아니면 `record: VISUAL-CLOSED <YYYY-MM-DD> <id> <url>` | 0; 1; 3; 4; 5 |
 | `show <id>` | `<title> (<id>) <status> <rev>안`, `url: <url>`, 이벤트마다 한 블록 | 0; 3; 4 |
 | `list [--product p] [--feature f] [--status s]` | 항목마다 `<id>\t<status>\t<product.name>\t<branch>\t<title>` | 0; 3 |
-| `pending` | 대기 알림 문구 또는 `none` | 0; 3 |
+| `pending [--session id] [--session-file path]` | 대기 알림 문구 또는 `none` | 0; 1; 3 |
 | `wait <id> [--timeout sec]` | `WAITING <id>`, 이어서 `FEEDBACK <id> <seq>` + 의견 메시지, 또는 `CLOSED <id>` | 0; 4; 6 시간 초과 |
 | `server status\|start\|stop\|restart` | `running pid=<pid> port=<port> version=<v>` 또는 `stopped` | 0; 7 꺼짐(status) |
 | `install [--no-tailscale] [--no-autostart]`, `uninstall`, `doctor` | `<step>: <result>` 줄 | 0 성공; 1 하나라도 실패 |
@@ -76,6 +76,10 @@ checkout 에서:
 종료 코드 8은 stderr에 `open proposal exists: <id> <url> - use: desk revise <id> <boardDir>, or desk submit --new` 를 출력합니다.
 
 `submit` 과 `revise` 는 보드 폴더의 절대 경로와 현재 폴더의 identity를 보내고, 검사는 서버가 합니다. CLI는 서버와 통신하기 전에 `ensure` 를 실행합니다. `/api/health` 를 1500ms 제한으로 확인하고, 다른 프로그램이 응답하면 3으로 끝나고, 버전이 다르면 설치된 앱 버전이 CLI 버전과 같을 때만 `/api/shutdown` 후 다시 띄우고, 아니면 `server version <x> differs from cli <y>; run install to update` 경고를 내고 실행 중인 서버를 그대로 쓰고, 응답이 없으면 서버를 띄운 뒤 health를 최대 20번 확인합니다. `DESK_URL` 은 기본 URL을 바꾸고, `DESK_NO_ENSURE=1` 은 서버 실행을 건너뛰고, `DESK_WAIT_POLL_MS`(기본 2000)와 `DESK_ENSURE_POLL_MS`(기본 500)는 확인 간격입니다.
+
+호출자 신원. `--session <id>` 와 `--session-file <path>` 는 호출한 세션을 명시합니다. 세션 ID는 명시한 `--session` > `DESK_SESSION` > `PI_SESSION_ID` > null 순으로 정합니다. 두 옵션이 없으면 env 동작은 그대로입니다. `--session` 만 주면 파일은 null로 기록하고, `--session-file` 은 준 값 그대로 기록하며, 그것만 주면 ID는 위 순서대로 정합니다. 경로를 읽거나 추측하지 않습니다. 값이 없거나 비었거나 `--` 로 시작하면(다음 옵션을 먹게 되면) 사용법 오류입니다. 종료 코드 1이며 `ensure` 와 모든 네트워크 호출보다 먼저 검사합니다. 다른 옵션 해석, 모르는 옵션 처리, 받아들이는 ID 형식은 바뀌지 않습니다. `sessionOf` 가 CLI의 유일한 소유 결정 지점입니다. `submit` 은 `identity.session` 으로, `revise`, `reply`, `close` 는 `session` 으로 보내고, `pending` 은 그것으로 조회합니다. `submit` 과 `revise` 는 서버의 `summary.owner` 로 `owner:` 줄을 출력하고, `--json` 출력은 그대로입니다.
+
+소유. 바뀌지 않은 재제출(같은 hash, `existing`)은 소유자 없는 보드라도 기존 소유자, 안, 이벤트 수를 그대로 둡니다. 다른 세션이 명시적으로 `revise` 하면 소유가 옮겨질 수 있고, 자동으로 가져가는 일은 없습니다. 세션 없이 손으로 쓰는 것도 허용되며 보드는 소유자 없이 남습니다. env가 프로세스 경계를 늘 넘는 것은 아니므로(monitor 레인이나 env가 지워진 셸은 `DESK_SESSION` 을 잃을 수 있음) 그런 레인의 에이전트는 `--session` 을 직접 넘깁니다. `pending --session <id>` 는 그 id로 `/api/here` 를 부르므로 그 세션을 살아 있는 것으로 세기도 합니다(90초 안에 `/api/here` 를 부른 세션이 살아 있는 세션). cwd 신원은 지금의 제품 키(remote 없으면 `dir/<name>`) 그대로입니다. 소스 변경은 설치 사본을 갱신한 뒤에야(`desk install`, 이어서 `/reload` 나 재시작) 실제 세션에 반영됩니다.
 
 Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들어 호출한 터미널이 닫혀도 살아남게 합니다. WMI가 실패하거나 env 키 중 `OMO_DESK_` 또는 `DESK_` 로 시작하는 것이 있으면 분리된 `spawn` 으로 대신합니다.
 
@@ -91,8 +95,11 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
               frames: [[label, path], ...] (>= 1) }] }],
   questions?: [{ id: /^[A-Za-z0-9_-]{1,40}$/ 고유, text, help?,
     options: [{ value: /^[A-Za-z0-9_.-]{1,60}$/ 질문 안에서 고유, label, rec?: boolean, why? }] (>= 2) }],
-  commentPlaceholder?: string }
+  commentPlaceholder?: string,
+  kind?: 'decision'|'report' }
 ```
+
+- `kind` 가 없으면 `decision` 입니다. 다른 값은 `kind` 를 가리키는 오류입니다. `report` 보드는 질문 없는 완료 보고이므로 `questions` 항목이 하나라도 있으면 `questions` 를 가리키는 오류입니다.
 
 - 엄격합니다. 다른 키는 오류입니다. 프로토타입의 최상위 `id` 는 무시하고, `sideSession`(문자열)은 `정할 것` 위에 회색 메모로 보입니다.
 - 그림 라벨은 보드 전체에서 고유합니다. 표시는 라벨로 그림을 가리킵니다.
@@ -113,6 +120,8 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 - 이 그림의 네모는 뷰어에도 그려집니다. 네모를 탭하면 선택되고, 새로 그린 네모는 선택된 채로 시작합니다. 그러면 뷰어 아래쪽에 번호, 의견 칸, `지우기` 가 나타납니다. 의견은 `표시한 곳` 목록에 보이는 것과 같고, `지우기` 는 모든 곳에서 네모를 지웁니다. 네모 밖을 탭하면 아래쪽 칸이 들어갑니다. 화면 키보드가 올라오면 칸은 키보드 위로 옮겨집니다.
 - 지난 안이나 끝난 기획안에서도 뷰어는 확대·이동용으로 열리지만 `표시하기` 와 아래쪽 칸은 없습니다.
 - `재요청` 은 답, 의견, 네모를 보내고 세션에 수정안을 요청합니다. 셋 중 하나는 있어야 합니다. `승인` 은 같은 내용을 보내면서 기획안을 승인합니다. 세션은 다시 보여 주지 않고 작업한 뒤 기획안을 닫습니다. 대화 기록에는 승인만 표시됩니다. 두 버튼은 처음 누를 때 잠기므로 한 번 누르면 한 번만 보냅니다. 보내지면 검토함으로 돌아가고, 실패하면 이유를 보이며 페이지에 남습니다. 닫기 버튼은 없습니다. 작업이 끝나면 세션이 `desk close` 로 기획안을 닫습니다.
+- 보고 보드(`kind: report`)는 `재요청` 과 `승인` 대신 `확인` 버튼 하나를 보입니다. 의견과 네모를 담아 verdict `ack` 를 보냅니다. 머리글에 `보고` 칩이 붙고, 안 탭, 이벤트 표시, 새 안 배너는 `n안` 대신 `갱신 n` 으로 읽으며, `정할 것` 카드는 질문 없이 `확인` 으로 보입니다. `kind` 가 없는 요약은 결정 보드로 그립니다.
+- 검토함은 보고 보드에 `보고` 칩과 `갱신 n` 을 보이고, `보고 N` 개수를 보이며, 열린 보고 보드를 결정 보드 다음에 따로 제목을 달아 묶습니다.
 - `닫기`, Esc, 휴대폰의 뒤로 가기 동작으로 닫습니다. 뷰어는 히스토리 항목 하나이므로 뒤로 가기는 뷰어만 닫고 페이지는 그 자리에 남습니다.
 - 제목 옆 `듣기` 는 보고 있는 안을 기기 자체 목소리(Web Speech `speechSynthesis`, 한국어)로 읽습니다. 순서: 가장 최근 일이 세션 답이면 그 답, 수정본이면 바뀐 점(수정 메모), 제목, 요약, 구획마다 구획 제목과 카드별 제목과 `say`(없으면 메모), 질문마다 선택지(추천인 것은 추천이라고 말하고 `why` 도 읽음), 마지막으로 `여기까지입니다`. 읽는 동안 버튼은 `멈추기` 가 되고, 화면이 넘어가도 왼쪽 아래에 떠 있는 `멈추기` 가 남아 있으며, 읽고 있는 카드에 테두리가 생기며 화면 가운데로 옵니다. 다른 안으로 바꾸면 멈춥니다.
 - 말로 답하려면 `전체 의견` 에서 폰 키보드의 마이크를 씁니다. 의견 하나로 모든 질문에 답해도 됩니다.
@@ -123,7 +132,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 <home>/
   app/                 저장소의 설치 사본
   data/proposals/<id>/ 기록 (서버만 씀)
-    proposal.json      { v: 1, id, title, created, product, feature, session }, 한 번만, 마지막에 씀
+    proposal.json      { v: 1, id, title, created, product, feature, session, kind }, 한 번만, 마지막에 씀
     revs/<n>/...       안마다 복사한 보드 파일
     events/<seq6>-<type>.json
     crops/<seq6>-<n>.png
@@ -137,8 +146,10 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 - 이벤트: `submitted`, `feedback`, `reply`, `revised`, `closed`. 1부터 번호를 매기고 재사용하지 않습니다. `submitted` 와 `revised` 는 내용 `hash` 를 가집니다.
 - 상태: `closed` 가 있으면 `closed`, 아니면 마지막이 `feedback` 일 때 `theirs`(세션 차례, 승인이면 `approved`), 그 외는 `mine`(내 차례).
 - 소유자는 세션 id가 있는 마지막 이벤트의 세션입니다.
+- `kind` 는 제출 때 `proposal.json` 에 쓰고 모든 요약에 `kind` 로 보입니다. 없는 기록은 `decision` 으로 읽습니다. revise는 kind를 유지하고, 보드의 kind가 다른 revise는 400 `bad_input` 입니다.
+- verdict: 결정 보드는 `change` 와 `approve`, 보고 보드는 `ack` 만(의견과 표시는 선택, 답 없음). 다른 조합은 400 `bad_input` 입니다. 의견도 표시도 없는 `ack` 은 의견 이벤트를 쓰고 같은 호출에서 `closed` 이벤트 `{ by: "user", summary: null }` 를 쓰며 우편함 파일은 쓰지 않습니다. 전달할 것이 없으므로 그 의견의 `delivery` 는 `none` 입니다. 의견이나 표시가 있는 `ack` 은 의견 이벤트만 씁니다. 상태는 `theirs` 가 되고, 평소의 우편함과 대기 알림 경로로 라우팅·전달되며, 소유 세션이나 다음 세션이 `desk close` 로 닫습니다.
 - 열린 상태에서 같은 기능 + 제목으로 다시 올리면, 내용 hash가 같을 때 기존 기획안을 돌려주고 다르면 종료 코드 8입니다. `--new` 는 항상 새로 만듭니다.
-- 의견의 `delivery` 는 계산값입니다: `none`(소유자 없음, 또는 우편함 쓰기 실패. 이벤트는 저장되고 서버가 한 번 재시도한 뒤 로그를 남김), `pending`(우편함 파일 있음), `delivered`.
+- 의견의 `delivery` 는 계산값입니다: `none`(소유자 없음, 전달할 것 없음(의견도 표시도 없는 `ack`), 또는 우편함 쓰기 실패. 이벤트는 저장되고 서버가 한 번 재시도한 뒤 로그를 남김), `pending`(우편함 파일 있음), `delivered`.
 - 제품 키는 정규화한 `origin` remote(소문자 `host/path`), 기능 키는 `<제품 키>#<브랜치>`, 개수와 알림의 범위는 워크트리 경로입니다.
 
 `config.json`: `{ "v": 1, "port": 4377, "publicBase": "https://<machine>.<tailnet>.ts.net:4378" | null, "pcTailnetIps": [...], "owner": "<tailscale login>" | null, "baseline443": {...} }`. `server.json` 은 서버만 씁니다: `{ "v", "name", "port", "pid", "started", "version" }`. 설치는 쓰지 않습니다.
@@ -156,9 +167,9 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | GET | `/files/<id>/revs/<n>/<path>`, `/files/<id>/crops/<file>` | read | 파일. 경로 탈출은 403 |
 | GET | `/api/health` | read | `{ ok, name: 'omo-desk', version, pid, port }` |
 | GET | `/api/caps` | read | `{ access, open, targets }` |
-| GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts는 거르지 않은 전체 `{ mine, theirs, closed }`) |
+| GET | `/api/proposals?product=&feature=&status=` | read | `{ items, facets, counts }` (counts는 거르지 않은 전체 `{ mine, theirs, closed, reports }`, `reports` = 열린 보고 보드) |
 | GET | `/api/p/<id>?since=<seq>` | read | `{ proposal, summary, url, revs, events }` |
-| POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }` |
+| POST | `/api/p/<id>/feedback` | feedback | `{ ok, seq, status, routed, delivery }`. verdict는 `change`, `approve`, `ack`(데이터 구조 참고) |
 | GET | `/api/push/key` | read | `{ publicKey }` (VAPID, base64url) |
 | POST | `/api/push/subscribe` | feedback | `{ ok }`, 이어서 그 브라우저에 환영 푸시 |
 | POST | `/api/push/unsubscribe` | feedback | `{ ok }` |
@@ -205,7 +216,9 @@ senpi 확장(`extension/omo-desk.ts`)은 하위 세션이나 task member 세션�
 - 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
 - `/reload` 뒤에는 교체된 예전 확장 사본이 senpi가 자기 세대를 stale로 처음 알릴 때 타이머를 멈추므로, 지금 사본만 폴링하고 세션을 깨웁니다.
 
-세션 id는 `DESK_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다.
+세션 id는 `DESK_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다. 보드 종류 때문에 확장이 바뀌지는 않습니다. 의견을 단 보고 확인을 포함해 `theirs` 보드는 이미 전달합니다.
+
+두 경로는 다릅니다. 우편함 후속 메시지는 자동이라 소유 세션에서 턴을 시작합니다. 대기 알림(`desk pending`, `/api/here`)은 수동이라 의견이 기다린다고 알리기만 하므로, 소유자 없는 보드는 보이지만 턴으로 전달되지는 않습니다.
 
 ## 알림
 
