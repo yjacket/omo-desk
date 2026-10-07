@@ -71,6 +71,7 @@ export function createDesk(pi, deps = {}) {
 	let refreshRerun = false;
 	let rerunStart = false;
 	let refreshTimeoutMs = FETCH_TIMEOUT_MS;
+	let rerunTimeoutMs = FETCH_TIMEOUT_MS;
 
 	const log = async (text) => {
 		try {
@@ -180,6 +181,8 @@ export function createDesk(pi, deps = {}) {
 				staleGeneration = true;
 				stop();
 				void log("stopped: extension generation replaced by reload");
+			} else {
+				void log(`publishWaiting: ${String((error && error.message) || error)}`);
 			}
 			return;
 		}
@@ -255,6 +258,7 @@ export function createDesk(pi, deps = {}) {
 		if (refreshPromise) {
 			refreshRerun = true;
 			rerunStart ||= Boolean(start);
+			rerunTimeoutMs = Math.min(rerunTimeoutMs, timeoutMs);
 			return refreshPromise;
 		}
 		refreshTimeoutMs = timeoutMs;
@@ -265,13 +269,15 @@ export function createDesk(pi, deps = {}) {
 					refreshRerun = false;
 					const startRerun = rerunStart;
 					rerunStart = false;
-					refreshTimeoutMs = timeoutMs;
+					refreshTimeoutMs = rerunTimeoutMs;
+					rerunTimeoutMs = FETCH_TIMEOUT_MS;
 					await refreshStatus(startRerun);
 				}
 			} finally {
 				refreshPromise = undefined;
 				refreshRerun = false;
 				rerunStart = false;
+				rerunTimeoutMs = FETCH_TIMEOUT_MS;
 			}
 		})();
 		return refreshPromise;

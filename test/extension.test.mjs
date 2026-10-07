@@ -264,6 +264,38 @@ test("session_start during a held refresh carries start=1 into the rerun", async
 	s.cleanup();
 });
 
+test("a tool refresh that joins a held timer refresh reruns with the short tool timeout", async () => {
+	let release;
+	let started;
+	const startedFirst = new Promise((resolve) => { started = resolve; });
+	const gate = new Promise((resolve) => { release = resolve; });
+	const timeouts = [];
+	let hereCalls = 0;
+	const s = setup({
+		abortAfter: (ms) => {
+			timeouts.push(ms);
+			return new AbortController().signal;
+		},
+		here: () => {
+			hereCalls += 1;
+			if (hereCalls === 2) {
+				started();
+				return gate.then(() => ({ footer: "", waiting: [] }));
+			}
+			return { footer: "", waiting: [] };
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const timerRefresh = s.handle.status(false);
+	await startedFirst;
+	const toolRefresh = s.pi.emit("tool_execution_end", s.ctx);
+	release();
+	await Promise.all([timerRefresh, toolRefresh]);
+	assert.equal(hereCalls, 3);
+	assert.deepEqual(timeouts, [5000, 5000, 1500]);
+	s.cleanup();
+});
+
 test("tool_execution_end resolves when its injected abort signal fires", async () => {
 	let signalReady;
 	const ready = new Promise((resolve) => { signalReady = resolve; });
