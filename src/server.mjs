@@ -371,6 +371,7 @@ export function createServer({ home, webDir, port = 4377, host = "127.0.0.1", co
 			mine: work.mine,
 			theirs: work.theirs,
 			pending,
+			waiting: (session ? store.waitingFor(session) : []).map((item) => ({ ...item, url: url(item.id) })),
 			notice: pendingNotice(noticed, cli),
 			noticeKeys: noticed.map((item) => `${item.id}:${item.latest ? item.latest.seq : 0}`),
 			footer: footerText({ mine: work.mine, theirs: work.theirs }),

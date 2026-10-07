@@ -684,6 +684,67 @@ test("here notice follows owner liveness, not delivery", async (t) => {
 	assert.ok(seen.notice && seen.notice.includes(id));
 });
 
+test("here lists the session's decision boards waiting on the owner", async (t) => {
+	const ctx = await withServer(t);
+	const dirA = makeBoard(ctx.home, "waiting-a");
+	const dirOther = makeBoard(ctx.home, "waiting-other");
+	const a = await submit(ctx, { srcDir: dirA, session: "sA", title: "A" });
+	await submit(ctx, { srcDir: reportBoard(ctx.home, "waiting-report"), session: "sA", title: "Report" });
+	const other = await submit(ctx, { srcDir: dirOther, session: "sB", title: "Other" });
+	const ownerlessDir = makeBoard(ctx.home, "waiting-ownerless");
+	const ownerlessIdentity = await identityFor(ownerlessDir, {});
+	await postJson(ctx.base, "/api/proposals", {
+		cwd: ownerlessDir,
+		identity: { ...ownerlessIdentity, session: null },
+		title: "Ownerless",
+		srcDir: ownerlessDir,
+	});
+	const closed = await submit(ctx, { srcDir: makeBoard(ctx.home, "waiting-closed"), session: "sA", title: "Closed" });
+	await postJson(ctx.base, `/api/p/${closed.body.summary.id}/close`, { summary: "done" });
+
+	const fetchHere = async (cwd, session) => {
+		const suffix = session ? `&session=${session}` : "";
+		return (await fetch(`${ctx.base}/api/here?cwd=${encodeURIComponent(cwd)}${suffix}`)).json();
+	};
+	const first = (await fetchHere(dirA, "sA")).waiting;
+	const submittedAt = (await (await fetch(`${ctx.base}/api/p/${a.body.summary.id}`)).json()).events[0].at;
+	assert.deepEqual(first, [{
+		id: a.body.summary.id,
+		title: "A",
+		status: "mine",
+		since: submittedAt,
+		seq: null,
+		url: `${ctx.base}/p/${a.body.summary.id}`,
+	}]);
+
+	await postJson(ctx.base, `/api/p/${a.body.summary.id}/reply`, { text: "ack", session: { id: "sA" } });
+	assert.equal((await fetchHere(dirA, "sA")).waiting[0].since, submittedAt);
+
+	const later = await submit(ctx, { srcDir: makeBoard(ctx.home, "waiting-later"), session: "sA", title: "Later" });
+	const sorted = (await fetchHere(dirA, "sA")).waiting;
+	assert.deepEqual(sorted.map((item) => item.id), [a.body.summary.id, later.body.summary.id]);
+	assert.deepEqual((await fetchHere(dirOther, "sB")).waiting.map((item) => item.id), [other.body.summary.id]);
+	assert.deepEqual((await fetchHere(dirA, null)).waiting, []);
+});
+
+test("a board stays waiting until its feedback is delivered", async (t) => {
+	const ctx = await withServer(t);
+	const dir = makeBoard(ctx.home, "waiting-feedback");
+	const { body: sub } = await submit(ctx, { srcDir: dir, session: "sA", title: "Feedback" });
+	const fb = await (await postJson(ctx.base, `/api/p/${sub.summary.id}/feedback`, { rev: 1, verdict: "change", comment: "revise" })).json();
+	const here = async () => (await fetch(`${ctx.base}/api/here?cwd=${encodeURIComponent(dir)}&session=sA`)).json();
+	let waiting = (await here()).waiting;
+	assert.equal(waiting.length, 1);
+	assert.equal(waiting[0].status, "theirs");
+	assert.equal(waiting[0].seq, fb.seq);
+
+	const inboxDir = path.join(ctx.home, "inbox", safeSegment("sA"));
+	const inbox = path.join(inboxDir, `${sub.summary.id}-${String(fb.seq).padStart(6, "0")}.json`);
+	fs.rmSync(inbox);
+	waiting = (await here()).waiting;
+	assert.deepEqual(waiting, []);
+});
+
 test("open with a missing aside exe is 404 not_installed and the server stays up", async (t) => {
 	const missing = path.join(REPO, "test", "no-such-aside.exe");
 	assert.ok(!fs.existsSync(missing), "the test needs a path that does not exist");

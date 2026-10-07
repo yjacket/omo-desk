@@ -610,3 +610,30 @@ test("forWorktree scopes by worktree and adopts deleted worktrees", () => {
 		cleanup();
 	}
 });
+
+test("waitingFor returns owned decisions with pending feedback and event timestamps", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home, { questions: QUESTIONS });
+		const mine = store.create({ identity: ident(home, "sA"), title: "Mine", srcDir: src, files: filesFor() }).summary;
+		const theirs = store.create({ identity: ident(home, "sA"), title: "Theirs", srcDir: src, files: filesFor(), force: true }).summary;
+		const report = store.create({ identity: ident(home, "sA"), title: "Report", srcDir: src, files: filesFor(), force: true, kind: "report" }).summary;
+		store.reply(mine.id, { text: "reply", session: { id: "sA" } });
+		const feedback = store.feedback(theirs.id, { rev: 1, verdict: "change", comment: "revise" });
+		store.writeInbox("sA", { proposalId: theirs.id, seq: feedback.event.seq });
+		const waiting = store.waitingFor("sA");
+		assert.deepEqual(waiting.map((item) => item.id), [mine.id, theirs.id]);
+		assert.equal(waiting[0].since, store.get(mine.id).events[0].at);
+		assert.equal(waiting[0].seq, null);
+		assert.equal(waiting[1].status, "theirs");
+		assert.equal(waiting[1].seq, 2);
+		assert.deepEqual(store.waitingFor(""), []);
+		assert.deepEqual(store.waitingFor("sB"), []);
+
+		fs.rmSync(path.join(home, "inbox", safeSegment("sA"), `${theirs.id}-000002.json`));
+		assert.deepEqual(store.waitingFor("sA").map((item) => item.id), [mine.id]);
+		store.close(report.id, { summary: "done" });
+	} finally {
+		cleanup();
+	}
+});

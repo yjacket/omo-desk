@@ -178,9 +178,11 @@ Server on `127.0.0.1:4377`. All POSTs need `content-type: application/json` and 
 | POST | `/api/p/<id>/revise` | session | `{ summary, url }` |
 | POST | `/api/p/<id>/reply` | session | `{ summary }` |
 | POST | `/api/p/<id>/close` | session | `{ summary }` |
-| GET | `/api/here?cwd=&session=[&start=1]` | session | `{ product, feature, mine, theirs, pending, notice, noticeKeys, footer }` |
+| GET | `/api/here?cwd=&session=[&start=1]` | session | `{ product, feature, mine, theirs, pending, waiting, notice, noticeKeys, footer }` |
 | POST | `/api/bye` | session | `{ ok }` |
 | POST | `/api/shutdown` | session | `{ ok }`, then exit |
+
+`waiting` lists the calling session's open decision boards that wait on the owner: status `mine`, or `theirs` while the latest feedback is still undelivered (delivery `pending`). Each entry is `{ id, title, url, status, since, seq }`, where `since` is the time of the board's last submitted, revised or feedback event (a session reply never moves it) and `seq` is the latest feedback's seq for `theirs`, else `null`. Report boards, ownerless boards and other sessions' boards are never listed, and without `session` it's `[]`.
 
 Errors: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400 with `details`, access denied 403 `{ error: 'forbidden' }`, `/api/open` URL over 30000 chars 413 `{ error: 'too_long' }`, `/api/open` with the Aside exe missing 404 `{ error: "not_installed" }`.
 
@@ -214,6 +216,12 @@ The senpi extension (`extension/omo-desk.ts`) does nothing in child or task-memb
 - Every 30 s, at session start and after each delivery it calls `/api/here`. The footer shows `보드 내 차례 {mine} · 세션 차례 {theirs}`. If the server is down it shows `보드 서버 꺼짐` and runs `desk server start` at most once per 120 s.
 - Notices: feedback waiting in this worktree whose owner isn't live (no `/api/here` call in 90 s, ended, child, or no id) is announced once per session. A resumed session is reminded of its own unanswered feedback at start.
 - On shutdown it calls `/api/bye` so the owner counts as gone at once.
+- Waiting boards: after every successful `/api/here` refresh it reports the `waiting` boards inside the answer window to senpi as wake source `omo-desk` (`wake_source_state` `{ source: "omo-desk", activeCount }`, emitted before the hold) and holds goal continuation (`continuation_hold_state` `{ source: "omo-desk", active }`). Without this, a goal re-prompts at once and the agent mirrors the board with the question tool, which a board answer can't settle. senpi reads only `source`/`activeCount` and `active`.
+- Release (hold false, then count 0) happens when no board is left, and at shutdown. While the server is unreachable, the last known waiting list is re-evaluated against the local clock on every tick: boards inside the window keep counting, expired ones release.
+- The answer window is senpi's `askUser.timeoutMinutes` (default 30), clamped to 1-120 minutes. It's measured from `since`, the board's last submitted, revised or feedback event, never a session reply. Viewing the page doesn't restart it, unlike the question tool's idle timer. An unparsable `since` counts as expired. Boards with status `theirs` always count.
+- It also refreshes after every tool execution (single-flight, with one rerun when a refresh was requested mid-flight), so a board submitted during a turn counts before the turn ends.
+- No answer: when a `mine` board passes the window it stops counting and the session gets one follow-up message `[omo-desk] 답이 없습니다: <title> (<id>), <n>분` that starts a turn, once per board and last-event time. After a session start or reload, a board that's already past the window gets no notice.
+- While a board counts, senpi treats it as background work, so a Stop hook for that turn is deferred until the answer turn (the omo-desk push notification is what tells the owner). While held, senpi shows no goal countdown; the footer `보드 내 차례 N` is the indicator. Child sessions and non-senpi sessions get neither the hold nor the notice.
 - After `/reload` the replaced copy of the extension stops its timers the first time senpi reports its generation as stale, so only the current copy polls and wakes the session.
 
 Session ids come from `DESK_SESSION` or `PI_SESSION_ID`. The extension isn't changed by board kinds: it already delivers `theirs` boards, including a report acked with a comment.

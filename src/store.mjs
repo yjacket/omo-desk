@@ -548,6 +548,28 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 		return { mine, theirs, pending };
 	}
 
+	function waitingFor(session) {
+		if (typeof session !== "string" || !session) return [];
+		const items = [];
+		for (const entry of entries.values()) {
+			const summary = summaryOf(entry);
+			if (summary.kind !== "decision" || summary.owner !== session) continue;
+			if (summary.status !== "mine" && summary.status !== "theirs") continue;
+			const feedback = [...entry.events].reverse().find((event) => event.type === "feedback") || null;
+			if (summary.status === "theirs" && (!feedback || withDelivery(entry, feedback).delivery !== "pending")) continue;
+			const lastEvent = [...entry.events].reverse().find((event) => ["submitted", "revised", "feedback"].includes(event.type));
+			if (!lastEvent) continue;
+			items.push({
+				id: summary.id,
+				title: summary.title,
+				status: summary.status,
+				since: lastEvent.at,
+				seq: summary.status === "theirs" ? feedback.seq : null,
+			});
+		}
+		return items.sort((a, b) => a.since < b.since ? -1 : a.since > b.since ? 1 : 0);
+	}
+
 	return {
 		create,
 		revise,
@@ -560,5 +582,6 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 		list,
 		facets,
 		forWorktree,
+		waitingFor,
 	};
 }

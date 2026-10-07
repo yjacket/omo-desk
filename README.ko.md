@@ -178,9 +178,11 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 | POST | `/api/p/<id>/revise` | session | `{ summary, url }` |
 | POST | `/api/p/<id>/reply` | session | `{ summary }` |
 | POST | `/api/p/<id>/close` | session | `{ summary }` |
-| GET | `/api/here?cwd=&session=[&start=1]` | session | `{ product, feature, mine, theirs, pending, notice, noticeKeys, footer }` |
+| GET | `/api/here?cwd=&session=[&start=1]` | session | `{ product, feature, mine, theirs, pending, waiting, notice, noticeKeys, footer }` |
 | POST | `/api/bye` | session | `{ ok }` |
 | POST | `/api/shutdown` | session | `{ ok }`, 이후 종료 |
+
+`waiting` 은 부른 세션의 열린 결정 보드 중 소유자 답을 기다리는 것을 나열합니다. 상태가 `mine` 이거나, `theirs` 인데 마지막 의견이 아직 전달되지 않은(delivery `pending`) 보드입니다. 항목은 `{ id, title, url, status, since, seq }` 이고, `since` 는 보드의 마지막 제출, 수정, 의견 이벤트 시각입니다(세션 답장은 바꾸지 않습니다). `seq` 는 `theirs` 일 때 마지막 의견의 seq, 아니면 `null` 입니다. 보고 보드, 소유자 없는 보드, 다른 세션의 보드는 나오지 않고, `session` 이 없으면 `[]` 입니다.
 
 오류: `not_found` 404, `closed` 409, `duplicate` 409 `{ error, id, url }`, `bad_rev` / `bad_input` 400, `invalid_board` 400(`details` 포함), 권한 없음 403 `{ error: 'forbidden' }`, `/api/open` URL이 30000자를 넘으면 413 `{ error: 'too_long' }`, Aside 실행 파일이 없으면 `/api/open` 은 404 `{ error: "not_installed" }`.
 
@@ -214,6 +216,12 @@ senpi 확장(`extension/omo-desk.ts`)은 하위 세션이나 task member 세션�
 - 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `보드 내 차례 {mine} · 세션 차례 {theirs}` 가 나옵니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `desk server start` 를 실행합니다.
 - 알림: 이 워크트리에서 기다리는 의견 중 소유 세션이 살아 있지 않은 것(90초 동안 `/api/here` 호출 없음, 종료, 하위 세션, id 없음)은 세션마다 한 번 알립니다. 재개된 세션은 시작할 때 자기에게 온 답 안 한 의견을 다시 안내받습니다.
 - 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
+- 기다리는 보드: `/api/here` 갱신이 성공할 때마다 답 시간 안의 `waiting` 보드를 senpi에 깨우기 출처 `omo-desk` 로 알리고(`wake_source_state` `{ source: "omo-desk", activeCount }`, 보류보다 먼저 보냄) goal 이어가기를 보류합니다(`continuation_hold_state` `{ source: "omo-desk", active }`). 이게 없으면 goal이 바로 다시 재촉하고, 에이전트는 보드를 질문 도구로 한 번 더 묻는데 보드 답으로는 그 질문이 풀리지 않습니다. senpi는 `source`/`activeCount` 와 `active` 만 읽습니다.
+- 해제(보류 false, 그다음 개수 0)는 남은 보드가 없을 때와 종료 때 일어납니다. 서버에 닿지 않는 동안에는 마지막으로 받은 waiting 목록을 매 주기 로컬 시계로 다시 따집니다. 답 시간 안의 보드는 계속 세고, 지난 보드는 해제합니다.
+- 답 시간은 senpi의 `askUser.timeoutMinutes`(기본 30)이고 1-120분으로 제한합니다. `since`, 곧 보드의 마지막 제출, 수정, 의견 이벤트부터 재며 세션 답장은 치지 않습니다. 질문 도구의 유휴 타이머와 달리 페이지를 봐도 다시 시작하지 않습니다. 읽을 수 없는 `since` 는 지난 것으로 칩니다. 상태가 `theirs` 인 보드는 항상 셉니다.
+- 도구 실행이 끝날 때마다 갱신도 합니다(한 번에 하나, 진행 중에 요청이 오면 한 번 더). 그래서 턴 중에 제출한 보드도 턴이 끝나기 전에 셉니다.
+- 무응답: `mine` 보드가 답 시간을 넘기면 세지 않고, 세션은 턴을 시작하는 후속 메시지 `[omo-desk] 답이 없습니다: <title> (<id>), <n>분` 을 보드와 마지막 이벤트 시각마다 한 번 받습니다. 세션 시작이나 reload 때 이미 답 시간이 지난 보드는 알리지 않습니다.
+- 보드를 세는 동안 senpi는 이를 백그라운드 작업으로 보므로 그 턴의 Stop hook은 답 턴까지 미뤄집니다(소유자에게는 omo-desk 푸시 알림이 알립니다). 보류 중에는 senpi가 goal 카운트다운을 보이지 않고, 하단 `보드 내 차례 N` 이 표시입니다. 하위 세션과 senpi가 아닌 세션은 보류도 알림도 받지 않습니다.
 - `/reload` 뒤에는 교체된 예전 확장 사본이 senpi가 자기 세대를 stale로 처음 알릴 때 타이머를 멈추므로, 지금 사본만 폴링하고 세션을 깨웁니다.
 
 세션 id는 `DESK_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다. 보드 종류 때문에 확장이 바뀌지는 않습니다. 의견을 단 보고 확인을 포함해 `theirs` 보드는 이미 전달합니다.
