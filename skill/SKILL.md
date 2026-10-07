@@ -115,6 +115,11 @@ Not running under Senpi: keep using `desk wait <id>` in the background. `desk sh
 
 ## After submitting
 
+- An open decision board is your pending question. Never ask the same thing with `ask_user_question` or in chat: a board answer cannot settle a question-tool request, so a mirrored question stays pending after the user answers the board. End the turn.
+- While a decision board you own waits inside the question tool's answer window (`askUser.timeoutMinutes`, default 30 minutes), the extension reports it to senpi as the live resumption channel `omo-desk` and holds goal continuation, so a goal does not re-prompt you; if a continuation still arrives, run `desk show <id>`, and while the board is open end the turn with the same one-line status naming the board id, without asking again.
+- If the window passes with no answer, the extension sends `[omo-desk] 답이 없습니다: ...` once. Apply the no-answer rule: take the recommended option when it is reversible and say so with `desk reply <id> <text>`, otherwise stop: do not ask again, end each turn with one sentence naming the blocker and the board URL, and set the goal blocked when senpi accepts it. A later answer is still delivered.
+- While a board is open, the goal prompt's and stall notice's advice to use the question tool does not apply: the board is the question.
+
 - The extension delivers the user's feedback to you as a message. Read it in full with `desk show <id>`.
 - Answer a comment: `desk reply <id> <text>`.
 - Never `desk reply` to adopt a board while its feedback is pending: reply sets the status to mine and the extension can drop the waiting payload.
