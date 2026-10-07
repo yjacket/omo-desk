@@ -63,7 +63,7 @@ function fakeCtx({ sessionId = SESSION, cwd = "C:/work/proj", hasUI = true, askU
 	return { ctx, statuses };
 }
 
-function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, proposalStatus = 200, fetchThrows = false, fsOverrides = {}, spawn: spawnOverride, askUser } = {}) {
+function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, proposalStatus = 200, fetchThrows = false, fsOverrides = {}, spawn: spawnOverride, askUser, abortAfter } = {}) {
 	const tmp = makeTmpHome();
 	const fp = fakePi();
 	if (piCwd !== undefined) fp.pi.cwd = piCwd;
@@ -82,8 +82,8 @@ function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, 
 		if (fetchThrows) throw new Error("connect ECONNREFUSED 127.0.0.1:4377");
 		const parsed = new URL(String(url));
 		if (parsed.pathname === "/api/here") {
-			const body = typeof state.here === "function" ? state.here(parsed) : state.here;
-			return { ok: true, status: 200, json: async () => body };
+			const body = typeof state.here === "function" ? state.here(parsed, opts) : state.here;
+			return { ok: true, status: 200, json: async () => await body };
 		}
 		if (parsed.pathname.startsWith("/api/p/")) {
 			const body = typeof state.proposal === "function" ? state.proposal(parsed) : state.proposal;
@@ -107,6 +107,7 @@ function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, 
 			},
 		},
 		fetch: fetchImpl,
+		abortAfter,
 		fs: fsImpl,
 		spawn:
 			spawnOverride ??
@@ -178,6 +179,118 @@ test("session_start registers the 3 s/30 s timers and asks /api/here with start=
 	await s.tick(30000);
 	assert.equal(s.fetchCalls.length, 2);
 	assert.doesNotMatch(s.fetchCalls[1].url, /start=1/, "later ticks are not a session start");
+	s.cleanup();
+});
+
+test("tool_execution_end refreshes /api/here once after session_start", async () => {
+	const s = setup();
+	await s.pi.emit("session_start", s.ctx);
+	await s.pi.emit("tool_execution_end", s.ctx);
+	assert.equal(s.fetchCalls.filter((call) => call.url.includes("/api/here")).length, 2);
+	assert.match(s.fetchCalls[0].url, /start=1$/);
+	assert.doesNotMatch(s.fetchCalls[1].url, /start=1/);
+	assert.equal(s.fetchCalls[1].opts.signal instanceof AbortSignal, true);
+	s.cleanup();
+});
+
+test("overlapping tool refreshes coalesce into one rerun awaited by every handler", async () => {
+	let release;
+	let releaseSecond;
+	let startedFirst;
+	let startedSecond;
+	const firstStarted = new Promise((resolve) => { startedFirst = resolve; });
+	const secondStarted = new Promise((resolve) => { startedSecond = resolve; });
+	const gate = new Promise((resolve) => { release = resolve; });
+	const secondGate = new Promise((resolve) => { releaseSecond = resolve; });
+	let hereCalls = 0;
+	const s = setup({
+		here: (_parsed) => {
+			hereCalls += 1;
+			if (hereCalls === 2) {
+				startedFirst();
+				return gate.then(() => ({ footer: "", waiting: [] }));
+			}
+			if (hereCalls === 3) {
+				startedSecond();
+				return secondGate.then(() => ({ footer: "", waiting: [{ id: "fresh", title: "Fresh", status: "theirs", seq: 2 }] }));
+			}
+			return { footer: "", waiting: [] };
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	let settled = 0;
+	const handlers = [s.pi.emit("tool_execution_end", s.ctx), s.pi.emit("tool_execution_end", s.ctx), s.pi.emit("tool_execution_end", s.ctx)]
+		.map((promise) => promise.then(() => { settled += 1; }));
+	await firstStarted;
+	assert.equal(hereCalls, 2, "only the first refresh is running");
+	assert.equal(settled, 0, "all tool handlers remain pending while refresh is held");
+	release();
+	await secondStarted;
+	assert.equal(hereCalls, 3, "one coalesced rerun follows the held refresh");
+	assert.equal(settled, 0, "tool handlers remain pending until the rerun completes");
+	releaseSecond();
+	await Promise.all(handlers);
+	assert.equal(settled, 3);
+	assert.ok(s.pi.emitted.some((event) => event.channel === "wake_source_state" && event.data.activeCount === 1), "the rerun includes the board added between fetches");
+	assert.equal(hereCalls, 3, "the burst produced exactly two additional fetches");
+	s.cleanup();
+});
+
+test("session_start during a held refresh carries start=1 into the rerun", async () => {
+	let release;
+	let started;
+	const startedFirst = new Promise((resolve) => { started = resolve; });
+	const gate = new Promise((resolve) => { release = resolve; });
+	let hereCalls = 0;
+	const s = setup({
+		here: (_parsed, opts) => {
+			hereCalls += 1;
+			if (hereCalls === 2) {
+				started();
+				return gate.then(() => ({ footer: "", waiting: [] }));
+			}
+			return { footer: "", waiting: [] };
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const firstRefresh = s.handle.status(false);
+	await startedFirst;
+	const startingSession = s.pi.emit("session_start", s.ctx);
+	release();
+	await Promise.all([firstRefresh, startingSession]);
+	assert.equal(hereCalls, 3);
+	assert.match(s.fetchCalls[1].url, /\/api\/here\?.*session=s-1$/);
+	assert.match(s.fetchCalls[2].url, /\/api\/here\?.*session=s-1&start=1$/);
+	s.cleanup();
+});
+
+test("tool_execution_end resolves when its injected abort signal fires", async () => {
+	let signalReady;
+	const ready = new Promise((resolve) => { signalReady = resolve; });
+	const controller = new AbortController();
+	let hereCalls = 0;
+	const s = setup({
+		abortAfter: (ms) => {
+			return ms === 1500 ? controller.signal : AbortSignal.timeout(ms);
+		},
+		here: (_parsed, opts) => {
+			hereCalls += 1;
+			if (hereCalls === 1) return { footer: "", waiting: [] };
+			return new Promise((_resolve, reject) => {
+			signalReady();
+			if (opts.signal.aborted) {
+				reject(new DOMException("aborted", "AbortError"));
+				return;
+			}
+			opts.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+			});
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const pending = s.pi.emit("tool_execution_end", s.ctx);
+	await ready;
+	controller.abort();
+	await assert.doesNotReject(() => pending);
 	s.cleanup();
 });
 
@@ -740,6 +853,70 @@ test("timeoutMinutes 0, -1 and 500 clamp to defaults/bounds", async () => {
 		}
 		s.cleanup();
 	}
+});
+
+test("expired mine board sends one timeout followUp before event emissions", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 1 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	s.advance(30 * 60_000);
+	await s.handle.status(false);
+	assert.equal(s.pi.sent.length, 1);
+	assert.equal(s.pi.sent[0].opts.deliverAs, "followUp");
+	assert.equal(s.pi.sent[0].opts.triggerTurn, true);
+	assert.deepEqual(s.pi.sent[0].message.details, { proposalId: "261004-abcd", timedOut: true });
+	assert.match(s.pi.sent[0].message.content, /^\[omo-desk\] 답이 없습니다: Test \(261004-abcd\), 31분\n처리:/);
+	assert.match(s.pi.sent[0].message.content, /node ".*\/app\/bin\/desk\.mjs" reply 261004-abcd 로 알리세요/);
+	assert.ok(s.pi.sent[0].message.content.includes("/"), "home path uses forward slashes");
+	assert.equal(s.pi.emitted.length, 4);
+	await s.pi.emit("tool_execution_end", s.ctx);
+	assert.equal(s.pi.sent.length, 1, "second refresh does not re-send");
+	s.cleanup();
+});
+
+test("revised since gets a new timeout notice", async () => {
+	const now = 1_750_000_000_000;
+	let since = new Date(now - 1 * 60_000).toISOString();
+	const s = setup({ here: () => ({ footer: "", waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }] }) });
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.sent.length, 0);
+	s.advance(31 * 60_000);
+	since = new Date(now + 30 * 60_000).toISOString();
+	s.advance(31 * 60_000);
+	await s.pi.emit("tool_execution_end", s.ctx);
+	assert.equal(s.pi.sent.length, 1);
+	s.cleanup();
+});
+
+test("expired boards already present at session_start stay silent across reload", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 31 * 60_000).toISOString();
+	const s = setup({ here: { footer: "", waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }] } });
+	await s.pi.emit("session_start", s.ctx);
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.sent.length, 0);
+	s.cleanup();
+});
+
+test("theirs boards and same-since session replies never trigger timeout notices", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 1 * 60_000).toISOString();
+	const s = setup({ here: { footer: "", waiting: [{ id: "261004-abcd", title: "Test", status: "theirs", since, seq: 3 }] } });
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.sent.length, 0);
+	s.advance(28 * 60_000);
+	s.state.here = { footer: "", waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }] };
+	await s.pi.emit("tool_execution_end", s.ctx);
+	assert.equal(s.pi.sent.length, 0, "session reply does not move since or restart its notice");
+	s.cleanup();
 });
 
 test("the embedded safeSegment matches src/paths.mjs", () => {

@@ -28,6 +28,7 @@ const INBOX_MS = 3000;
 const STATUS_MS = 30000;
 const SPAWN_COOLDOWN_MS = 120_000;
 const FETCH_TIMEOUT_MS = 5000;
+const TOOL_REFRESH_TIMEOUT_MS = 1500;
 const DEFAULT_PORT = 4377;
 const SERVER_DOWN = "보드 서버 꺼짐";
 const WAKE_SOURCE = "omo-desk";
@@ -47,6 +48,7 @@ export function createDesk(pi, deps = {}) {
 	const now = deps.now ?? (() => Date.now());
 	const timer = deps.timer ?? { setInterval, clearInterval };
 	const doFetch = deps.fetch ?? ((...args) => globalThis.fetch(...args));
+	const abortAfter = deps.abortAfter ?? ((ms) => AbortSignal.timeout(ms));
 	const fsImpl = deps.fs ?? fs;
 	const spawnImpl = deps.spawn ?? spawn;
 	const execPath = deps.execPath ?? process.execPath;
@@ -64,6 +66,11 @@ export function createDesk(pi, deps = {}) {
 	let lastSpawnAt = -Infinity;
 	let baseUrlCache;
 	let waitingSnapshot = [];
+	let initializedSession = false;
+	let refreshPromise;
+	let refreshRerun = false;
+	let rerunStart = false;
+	let refreshTimeoutMs = FETCH_TIMEOUT_MS;
 
 	const log = async (text) => {
 		try {
@@ -159,6 +166,12 @@ export function createDesk(pi, deps = {}) {
 		for (const key of keys) noticed.add(key);
 	});
 
+	const answerWindowMs = () => {
+		const rawMinutes = ctx?.getAskUserSettings?.()?.timeoutMinutes;
+		const timeoutMinutes = typeof rawMinutes === "number" && rawMinutes > 0 ? Math.min(120, Math.max(1, rawMinutes)) : ANSWER_WINDOW_DEFAULT_MIN;
+		return timeoutMinutes * 60_000;
+	};
+
 	const publishWaiting = safe("publishWaiting", () => {
 		try {
 			void ctx?.hasUI;
@@ -170,10 +183,22 @@ export function createDesk(pi, deps = {}) {
 			}
 			return;
 		}
-		const rawMinutes = ctx?.getAskUserSettings?.()?.timeoutMinutes;
-		const timeoutMinutes = typeof rawMinutes === "number" && rawMinutes > 0 ? Math.min(120, Math.max(1, rawMinutes)) : ANSWER_WINDOW_DEFAULT_MIN;
-		const windowMs = timeoutMinutes * 60_000;
+		const windowMs = answerWindowMs();
 		const currentTime = now();
+		for (const item of waitingSnapshot) {
+			if (item.status !== "mine") continue;
+			const since = Date.parse(item.since);
+			if (isNaN(since) || currentTime - since < windowMs) continue;
+			const key = `${item.id}@${item.since}`;
+			if (timedOut.has(key)) continue;
+			timedOut.add(key);
+			const minutes = Math.floor((currentTime - since) / 60_000);
+			const content = `[omo-desk] 답이 없습니다: ${item.title} (${item.id}), ${minutes}분\n처리: 되돌릴 수 있으면 권장안으로 진행하고 node "${home.replace(/\\/g, "/")}/app/bin/desk.mjs" reply ${item.id} 로 알리세요. 되돌릴 수 없으면 멈추세요. 나중에 온 답도 전달됩니다.`;
+			pi?.sendMessage?.(
+				{ customType: "omo-desk", content, display: true, details: { proposalId: item.id, timedOut: true } },
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
+		}
 		const live = waitingSnapshot.filter((item) => {
 			if (item.status === "theirs") return !delivered.has(`${item.id}-${item.seq}`);
 			if (item.status === "mine") {
@@ -192,13 +217,13 @@ export function createDesk(pi, deps = {}) {
 		}
 	});
 
-	const status = safe("status", async (start) => {
+	const refreshStatus = safe("status", async (start) => {
 		const cwd = ctx?.cwd ?? pi?.cwd ?? process.cwd();
 		if (!sessionId || !cwd) return;
 		const url = `${await baseUrl()}/api/here?cwd=${encodeURIComponent(cwd)}&session=${encodeURIComponent(sessionId)}${start ? "&start=1" : ""}`;
 		let response;
 		try {
-			response = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+			response = await doFetch(url, { headers: { accept: "application/json" }, signal: abortAfter(refreshTimeoutMs) });
 		} catch (error) {
 			await log(`status: ${String((error && error.message) || error)}`);
 			await setFooter(SERVER_DOWN);
@@ -214,10 +239,45 @@ export function createDesk(pi, deps = {}) {
 		}
 		const body = await response.json();
 		waitingSnapshot = Array.isArray(body?.waiting) ? body.waiting : [];
+		if (!initializedSession) {
+			for (const item of waitingSnapshot) {
+				const since = Date.parse(item.since);
+				if (item.status === "mine" && !isNaN(since) && now() - since >= answerWindowMs()) timedOut.add(`${item.id}@${item.since}`);
+			}
+			initializedSession = true;
+		}
 		await setFooter(typeof body?.footer === "string" ? body.footer : "");
 		await notice(body);
 		publishWaiting();
 	});
+
+	const status = (start, timeoutMs = FETCH_TIMEOUT_MS) => {
+		if (refreshPromise) {
+			refreshRerun = true;
+			rerunStart ||= Boolean(start);
+			return refreshPromise;
+		}
+		refreshTimeoutMs = timeoutMs;
+		refreshPromise = (async () => {
+			try {
+				await refreshStatus(start);
+				while (refreshRerun) {
+					refreshRerun = false;
+					const startRerun = rerunStart;
+					rerunStart = false;
+					refreshTimeoutMs = timeoutMs;
+					await refreshStatus(startRerun);
+				}
+			} finally {
+				refreshPromise = undefined;
+				refreshRerun = false;
+				rerunStart = false;
+			}
+		})();
+		return refreshPromise;
+	};
+
+	const onToolExecutionEnd = safe("tool_execution_end", () => status(false, TOOL_REFRESH_TIMEOUT_MS));
 
 	async function removeQuietly(file) {
 		try {
@@ -324,6 +384,7 @@ export function createDesk(pi, deps = {}) {
 
 	const onSessionStart = safe("session_start", async (_event, nextCtx) => {
 		ctx = nextCtx;
+		initializedSession = false;
 		try {
 			sessionId = nextCtx?.sessionManager?.getSessionId?.() ?? sessionId;
 		} catch {
@@ -353,6 +414,7 @@ export function createDesk(pi, deps = {}) {
 	try {
 		pi?.on?.("session_start", onSessionStart);
 		pi?.on?.("session_shutdown", onSessionShutdown);
+		pi?.on?.("tool_execution_end", onToolExecutionEnd);
 	} catch (error) {
 		void log(`register: ${String((error && error.message) || error)}`);
 	}
