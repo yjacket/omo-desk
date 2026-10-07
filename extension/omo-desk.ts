@@ -1,12 +1,16 @@
 /**
- * omo-desk senpi extension (plan todo 11).
+ * omo-desk senpi extension (plan todos 4-6).
  *
  * Loaded into every interactive session from <agentDir>/extensions. It is inert
  * in omo-task child sessions, registers no tools and never does blocking I/O:
  *   - every 3 s it drains <home>/inbox/<session>/*.json and delivers each
  *     feedback payload the server dropped there (followUp, wakes the turn);
  *   - every 30 s it refreshes the footer from /api/here, starts the server when
- *     it is down, and announces unanswered reviews once per session.
+ *     it is down, and announces unanswered reviews once per session;
+ *   - it reports waiting decision boards to senpi as a wake source and goal hold,
+ *     emitting wake_source_state and continuation_hold_state; refreshes also happen
+ *     after every tool execution; and it tells a session once when its board passes
+ *     the answer window.
  *
  * senpi evaluates extensions through jiti/vm, where dynamic import() of repo
  * modules fails with ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING, so safeSegment and
@@ -26,6 +30,10 @@ const SPAWN_COOLDOWN_MS = 120_000;
 const FETCH_TIMEOUT_MS = 5000;
 const DEFAULT_PORT = 4377;
 const SERVER_DOWN = "보드 서버 꺼짐";
+const WAKE_SOURCE = "omo-desk";
+const WAKE_EVENT = "wake_source_state";
+const HOLD_EVENT = "continuation_hold_state";
+const ANSWER_WINDOW_DEFAULT_MIN = 30;
 
 /** Same rule as src/paths.mjs safeSegment. */
 export function safeSegment(value) {
@@ -46,6 +54,7 @@ export function createDesk(pi, deps = {}) {
 
 	const delivered = new Set();
 	const noticed = new Set();
+	const timedOut = new Set();
 	let ctx;
 	let sessionId;
 	let timers = [];
@@ -54,6 +63,7 @@ export function createDesk(pi, deps = {}) {
 	let lastFooter;
 	let lastSpawnAt = -Infinity;
 	let baseUrlCache;
+	let waitingSnapshot = [];
 
 	const log = async (text) => {
 		try {
@@ -149,6 +159,39 @@ export function createDesk(pi, deps = {}) {
 		for (const key of keys) noticed.add(key);
 	});
 
+	const publishWaiting = safe("publishWaiting", () => {
+		try {
+			void ctx?.hasUI;
+		} catch (error) {
+			if (String(error?.message ?? error).includes("stale extension generation")) {
+				staleGeneration = true;
+				stop();
+				void log("stopped: extension generation replaced by reload");
+			}
+			return;
+		}
+		const rawMinutes = ctx?.getAskUserSettings?.()?.timeoutMinutes;
+		const timeoutMinutes = typeof rawMinutes === "number" && rawMinutes > 0 ? Math.min(120, Math.max(1, rawMinutes)) : ANSWER_WINDOW_DEFAULT_MIN;
+		const windowMs = timeoutMinutes * 60_000;
+		const currentTime = now();
+		const live = waitingSnapshot.filter((item) => {
+			if (item.status === "theirs") return !delivered.has(`${item.id}-${item.seq}`);
+			if (item.status === "mine") {
+				const since = Date.parse(item.since);
+				if (isNaN(since)) return false;
+				return currentTime - since < windowMs;
+			}
+			return false;
+		});
+		if (live.length > 0) {
+			pi?.events?.emit?.(WAKE_EVENT, { source: WAKE_SOURCE, activeCount: live.length });
+			pi?.events?.emit?.(HOLD_EVENT, { source: WAKE_SOURCE, active: true });
+		} else {
+			pi?.events?.emit?.(HOLD_EVENT, { source: WAKE_SOURCE, active: false });
+			pi?.events?.emit?.(WAKE_EVENT, { source: WAKE_SOURCE, activeCount: 0 });
+		}
+	});
+
 	const status = safe("status", async (start) => {
 		const cwd = ctx?.cwd ?? pi?.cwd ?? process.cwd();
 		if (!sessionId || !cwd) return;
@@ -160,16 +203,20 @@ export function createDesk(pi, deps = {}) {
 			await log(`status: ${String((error && error.message) || error)}`);
 			await setFooter(SERVER_DOWN);
 			await ensureServer();
+			publishWaiting();
 			return;
 		}
 		if (!response || !response.ok) {
 			await setFooter(SERVER_DOWN);
 			await ensureServer();
+			publishWaiting();
 			return;
 		}
 		const body = await response.json();
+		waitingSnapshot = Array.isArray(body?.waiting) ? body.waiting : [];
 		await setFooter(typeof body?.footer === "string" ? body.footer : "");
 		await notice(body);
+		publishWaiting();
 	});
 
 	async function removeQuietly(file) {
@@ -227,11 +274,15 @@ export function createDesk(pi, deps = {}) {
 					{ deliverAs: "followUp", triggerTurn: true },
 				);
 				delivered.add(key);
+				waitingSnapshot = waitingSnapshot.filter((item) => item.id !== payload.proposalId);
 				deliveredAny = true;
 			}
 			await removeQuietly(file);
 		}
-		if (deliveredAny) await status(false);
+		if (deliveredAny) {
+			publishWaiting();
+			await status(false);
+		}
 	});
 
 	let inboxRunning = false;
@@ -284,6 +335,8 @@ export function createDesk(pi, deps = {}) {
 
 	const onSessionShutdown = safe("session_shutdown", async () => {
 		stop();
+		pi?.events?.emit?.(HOLD_EVENT, { source: WAKE_SOURCE, active: false });
+		pi?.events?.emit?.(WAKE_EVENT, { source: WAKE_SOURCE, activeCount: 0 });
 		if (!sessionId) return;
 		try {
 			await doFetch(`${await baseUrl()}/api/bye`, {

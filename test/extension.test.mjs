@@ -24,6 +24,7 @@ const PAYLOAD = {
 function fakePi() {
 	const handlers = new Map();
 	const sent = [];
+	const emitted = [];
 	return {
 		pi: {
 			on(event, handler) {
@@ -33,16 +34,22 @@ function fakePi() {
 			sendMessage(message, opts) {
 				sent.push({ message, opts });
 			},
+			events: {
+				emit(channel, data) {
+					emitted.push({ channel, data });
+				},
+			},
 		},
 		handlers,
 		sent,
+		emitted,
 		async emit(event, ctx) {
 			for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
 		},
 	};
 }
 
-function fakeCtx({ sessionId = SESSION, cwd = "C:/work/proj", hasUI = true } = {}) {
+function fakeCtx({ sessionId = SESSION, cwd = "C:/work/proj", hasUI = true, askUser } = {}) {
 	const statuses = [];
 	const ctx = {
 		cwd,
@@ -50,14 +57,17 @@ function fakeCtx({ sessionId = SESSION, cwd = "C:/work/proj", hasUI = true } = {
 		ui: { setStatus: (key, text) => statuses.push([key, text]) },
 		sessionManager: { getSessionId: () => sessionId },
 	};
+	if (askUser) {
+		ctx.getAskUserSettings = () => askUser;
+	}
 	return { ctx, statuses };
 }
 
-function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, proposalStatus = 200, fetchThrows = false, fsOverrides = {}, spawn: spawnOverride } = {}) {
+function setup({ env = {}, sessionId = SESSION, hasUI = true, cwd, piCwd, here, proposal, proposalStatus = 200, fetchThrows = false, fsOverrides = {}, spawn: spawnOverride, askUser } = {}) {
 	const tmp = makeTmpHome();
 	const fp = fakePi();
 	if (piCwd !== undefined) fp.pi.cwd = piCwd;
-	const { ctx, statuses } = fakeCtx({ sessionId, hasUI, cwd });
+	const { ctx, statuses } = fakeCtx({ sessionId, hasUI, cwd, askUser });
 	const timers = [];
 	const spawned = [];
 	const fetchCalls = [];
@@ -444,6 +454,292 @@ test("a throwing hook is logged, never thrown into senpi", async () => {
 	assert.equal(existsSync(logFile), true);
 	assert.match(readFileSync(logFile, "utf8"), /inbox:/);
 	s.cleanup();
+});
+
+test("a mine board inside the window -> recorded order is [wake activeCount 1, hold true]", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.emitted.length, 2);
+	assert.deepEqual(s.pi.emitted[0], { channel: "wake_source_state", data: { source: "omo-desk", activeCount: 1 } });
+	assert.deepEqual(s.pi.emitted[1], { channel: "continuation_hold_state", data: { source: "omo-desk", active: true } });
+	s.cleanup();
+});
+
+test("waiting goes from 1 to [] -> recorded order [hold false, wake 0]", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.emitted.length, 2);
+	s.pi.emitted.length = 0;
+	s.state.here.waiting = [];
+	await s.tick(30000);
+	assert.equal(s.pi.emitted.length, 2);
+	assert.deepEqual(s.pi.emitted[0], { channel: "continuation_hold_state", data: { source: "omo-desk", active: false } });
+	assert.deepEqual(s.pi.emitted[1], { channel: "wake_source_state", data: { source: "omo-desk", activeCount: 0 } });
+	s.cleanup();
+});
+
+test("a mine board older than the window is not counted while a theirs board of the same age is", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 40 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [
+				{ id: "261004-mine", title: "Mine", status: "mine", since, seq: null },
+				{ id: "261004-theirs", title: "Theirs", status: "theirs", since, seq: 3 },
+			],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	assert.equal(s.pi.emitted.length, 2);
+	assert.equal(s.pi.emitted[0].data.activeCount, 1);
+	assert.equal(s.pi.emitted[1].data.active, true);
+	s.cleanup();
+});
+
+test("getAskUserSettings timeoutMinutes 5 shrinks the window", async () => {
+	const now = 1_750_000_000_000;
+	const mine4min = new Date(now - 4 * 60_000).toISOString();
+	const mine6min = new Date(now - 6 * 60_000).toISOString();
+	const s = setup({
+		hasUI: true,
+		askUser: { timeoutMinutes: 5 },
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [
+				{ id: "261004-4", title: "4min", status: "mine", since: mine4min, seq: null },
+				{ id: "261004-6", title: "6min", status: "mine", since: mine6min, seq: null },
+			],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const counts = s.pi.emitted.filter((e) => e.channel === "wake_source_state").map((e) => e.data.activeCount);
+	assert.deepEqual(counts, [1], "only the 4-min board is inside the 5-minute window");
+	s.cleanup();
+});
+
+test("unreachable server: the cached snapshot is re-published; expired board releases hold", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	let refreshCallCount = 0;
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	s.state.here = () => {
+		refreshCallCount++;
+		if (refreshCallCount > 1) throw new Error("server down");
+		return { waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }] };
+	};
+	await s.pi.emit("session_start", s.ctx);
+	s.pi.emitted.length = 0;
+	await s.tick(30000);
+	assert.ok(s.pi.emitted.some((e) => e.data.activeCount === 1), "first refresh still shows the board");
+	s.pi.emitted.length = 0;
+	await s.tick(30000);
+	assert.ok(s.pi.emitted.some((e) => e.data.activeCount === 1), "server down: cached snapshot re-published with board still inside window");
+	s.pi.emitted.length = 0;
+	s.advance(35 * 60_000);
+	await s.tick(30000);
+	const emissions = s.pi.emitted.filter((e) => e.channel === "wake_source_state");
+	assert.ok(emissions.some((e) => e.data.activeCount === 0), "after advancing past the window, server down refresh shows count 0");
+	s.cleanup();
+});
+
+test("shutdown emits hold false then wake 0", async () => {
+	const s = setup();
+	await s.pi.emit("session_start", s.ctx);
+	s.pi.emitted.length = 0;
+	await s.pi.emit("session_shutdown", s.ctx);
+	const shutdownEvents = s.pi.emitted.filter((e) => e.channel === "continuation_hold_state" || e.channel === "wake_source_state");
+	assert.equal(shutdownEvents.length, 2);
+	assert.deepEqual(shutdownEvents[0], { channel: "continuation_hold_state", data: { source: "omo-desk", active: false } });
+	assert.deepEqual(shutdownEvents[1], { channel: "wake_source_state", data: { source: "omo-desk", activeCount: 0 } });
+	s.cleanup();
+});
+
+test("a pi without events never throws", async () => {
+	const fp = fakePi();
+	delete fp.pi.events;
+	const tmp = makeTmpHome();
+	const { ctx } = fakeCtx();
+	const handle = createDesk(fp.pi, {
+		env: { OMO_DESK_HOME: tmp.home },
+		home: tmp.home,
+		now: () => 1_750_000_000_000,
+		timer: { setInterval: () => ({}), clearInterval: () => {} },
+		fetch: async () => ({
+			ok: true,
+			status: 200,
+			json: async () => ({ footer: "", waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since: new Date(1_750_000_000_000 - 10 * 60_000).toISOString(), seq: null }] }),
+		}),
+	});
+	await assert.doesNotReject(async () => {
+		await handle.status(true);
+	});
+	handle.stop();
+	tmp.cleanup();
+});
+
+test("every emitted pair satisfies hold.active === (activeCount > 0)", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	for (let i = 0; i < s.pi.emitted.length; i += 2) {
+		const wake = s.pi.emitted[i];
+		const hold = s.pi.emitted[i + 1];
+		if (wake && hold) {
+			const holdActive = hold.data.active;
+			const wakeCount = wake.data.activeCount;
+			assert.equal(holdActive, wakeCount > 0, `pair at ${i}: hold.active=${holdActive} but activeCount=${wakeCount}`);
+		}
+	}
+	s.cleanup();
+});
+
+test("board cached as theirs with inbox payload, post-delivery refresh fails", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	let refreshCallCount = 0;
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "theirs", since, seq: 3 }],
+		},
+	});
+	s.state.here = () => {
+		refreshCallCount++;
+		if (refreshCallCount > 1) throw new Error("server down after delivery");
+		return { waiting: [{ id: "261004-abcd", title: "Test", status: "theirs", since, seq: 3 }], footer: "" };
+	};
+	await s.pi.emit("session_start", s.ctx);
+	s.pi.sent.length = 0;
+	s.pi.emitted.length = 0;
+	s.writeInbox();
+	await s.tick(3000);
+	const delivered = s.pi.sent.length > 0;
+	assert.equal(delivered, true, "board delivered as followUp");
+	const eventAfterDelivery = s.pi.emitted.filter((e) => e.channel === "wake_source_state");
+	const hasCountZero = eventAfterDelivery.some((e) => e.data.activeCount === 0);
+	assert.equal(hasCountZero, true, "post-delivery refresh emits count 0 even when server fails");
+	s.cleanup();
+});
+
+test("a since of 'garbage' never counts as live", async () => {
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since: "garbage", seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const counts = s.pi.emitted.filter((e) => e.channel === "wake_source_state").map((e) => e.data.activeCount);
+	assert.ok(counts.every((c) => c === 0), "board with invalid since never counts");
+	s.cleanup();
+});
+
+test("a second session_start (reload) re-emits the current state on its first refresh", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	const firstStart = s.pi.emitted.length;
+	s.pi.emitted.length = 0;
+	await s.pi.emit("session_start", s.ctx);
+	assert.ok(s.pi.emitted.length > 0, "second session_start causes a refresh with events");
+	s.cleanup();
+});
+
+test("a theirs item whose id-seq was already delivered by this copy is not counted", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 10 * 60_000).toISOString();
+	const s = setup({
+		here: {
+			footer: "",
+			notice: null,
+			noticeKeys: [],
+			waiting: [{ id: "261004-abcd", title: "Test", status: "theirs", since, seq: 3 }],
+		},
+	});
+	await s.pi.emit("session_start", s.ctx);
+	s.pi.emitted.length = 0;
+	s.writeInbox("261004-abcd-000003.json", PAYLOAD);
+	await s.tick(3000);
+	assert.equal(s.pi.sent.length, 1, "payload delivered");
+	s.pi.emitted.length = 0;
+	await s.tick(30000);
+	const counts = s.pi.emitted.filter((e) => e.channel === "wake_source_state").map((e) => e.data.activeCount);
+	assert.ok(counts.some((c) => c === 0), "after delivery, the same theirs item no longer counts");
+	s.cleanup();
+});
+
+test("timeoutMinutes 0, -1 and 500 clamp to defaults/bounds", async () => {
+	const now = 1_750_000_000_000;
+	const since = new Date(now - 35 * 60_000).toISOString();
+	for (const minutes of [0, -1, 500]) {
+		const s = setup({
+			askUser: { timeoutMinutes: minutes },
+			here: {
+				footer: "",
+				notice: null,
+				noticeKeys: [],
+				waiting: [{ id: "261004-abcd", title: "Test", status: "mine", since, seq: null }],
+			},
+		});
+		await s.pi.emit("session_start", s.ctx);
+		const counts = s.pi.emitted.filter((e) => e.channel === "wake_source_state").map((e) => e.data.activeCount);
+		if (minutes === 0 || minutes === -1) {
+			assert.ok(counts.some((c) => c === 0), `timeoutMinutes ${minutes} should clamp to default 30, board older than window`);
+		} else if (minutes === 500) {
+			assert.ok(counts.some((c) => c === 1), `timeoutMinutes 500 should clamp to 120, board inside 120-minute window`);
+		}
+		s.cleanup();
+	}
 });
 
 test("the embedded safeSegment matches src/paths.mjs", () => {
