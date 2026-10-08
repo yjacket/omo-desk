@@ -33,6 +33,7 @@
 		title: $("title"),
 		lead: $("lead"),
 		listenBtn: $("listenBtn"),
+		restartBtn: $("restartBtn"),
 		tabs: $("tabs"),
 		loadError: $("loadError"),
 		revBanner: $("revBanner"),
@@ -291,6 +292,7 @@
 		const n = state.revs.some((r) => r.n === wanted) ? wanted : state.latest;
 		if (n === state.rev) return;
 		stopListening();
+		forgetListening();
 		state.rev = n;
 		state.readOnly = n !== state.latest;
 		if (replace) {
@@ -984,6 +986,8 @@
 	const SAY_MAX = 160;
 	// The run in progress; a stopped or replaced run ignores its late utterance events.
 	let reading = null;
+	// Where a run stopped partway ({ rev, at, text } of the piece being read), so the next 듣기 goes on from there.
+	let resumeAt = null;
 
 	// Sentences joined for the ear: each piece ends with a full stop unless it already ends a sentence.
 	function spoken(...pieces) {
@@ -1048,18 +1052,28 @@
 	}
 
 	// The title-bar button turns into 멈추기, and the floating 멈추기 stays on screen while the page scrolls card by card.
+	// Stopped partway, it offers 이어 듣기 and 처음부터 instead of 듣기.
 	function setListening(on) {
-		el.listenBtn.textContent = on ? "멈추기" : "듣기";
+		el.listenBtn.textContent = on ? "멈추기" : resumeAt ? "이어 듣기" : "듣기";
 		el.listenBtn.setAttribute("aria-pressed", String(on));
+		el.restartBtn.hidden = on || !resumeAt;
 		el.stopFab.hidden = !on;
 	}
 
+	// Stops the run and remembers the piece it was on; the run's own end forgets it instead.
 	function stopListening() {
 		if (!reading) return;
+		const run = reading;
 		reading = null;
+		resumeAt = run.at > 0 ? { rev: state.rev, at: run.at, text: run.texts[run.at] } : null;
 		window.speechSynthesis.cancel();
 		markReading(null);
 		setListening(false);
+	}
+
+	function forgetListening() {
+		resumeAt = null;
+		if (!reading) setListening(false);
 	}
 
 	// The device's own voice: its default Korean voice when it has one; otherwise the engine picks one for ko-KR.
@@ -1068,22 +1082,25 @@
 		return voices.find((v) => v.default) || voices.find((v) => v.localService) || voices[0] || null;
 	}
 
-	function startListening() {
+	function startListening({ fromTop = false } = {}) {
 		if (!state.summary) return;
 		const synth = window.speechSynthesis;
 		if (synth.speaking || synth.pending) synth.cancel();
 		if (synth.paused) synth.resume();
-		const run = {};
+		const run = { at: 0, texts: [] };
 		reading = run;
 		const voice = koreanVoice();
 		const queue = [];
 		for (const part of listenParts()) {
 			for (const text of sayChunks(part.text)) {
+				const index = queue.length;
 				const utterance = new SpeechSynthesisUtterance(text);
 				utterance.lang = "ko-KR";
 				if (voice) utterance.voice = voice;
 				utterance.onstart = () => {
-					if (reading === run) markReading(part.node);
+					if (reading !== run) return;
+					run.at = index;
+					markReading(part.node);
 				};
 				utterance.onerror = (e) => {
 					if (reading !== run || e.error === "interrupted" || e.error === "canceled") return;
@@ -1091,13 +1108,23 @@
 					stopListening();
 				};
 				queue.push(utterance);
+				run.texts.push(text);
 			}
 		}
 		queue[queue.length - 1].onend = () => {
-			if (reading === run) stopListening();
+			if (reading !== run) return;
+			run.at = 0;
+			stopListening();
 		};
+		// Go on from the stopped piece; if new events shifted the pieces, find it by its text, else start over.
+		let from = 0;
+		if (!fromTop && resumeAt && resumeAt.rev === state.rev) {
+			from = run.texts[resumeAt.at] === resumeAt.text ? resumeAt.at : Math.max(0, run.texts.indexOf(resumeAt.text));
+		}
+		run.at = from;
+		resumeAt = null;
 		setListening(true);
-		for (const utterance of queue) synth.speak(utterance);
+		for (const utterance of queue.slice(from)) synth.speak(utterance);
 	}
 
 	// ---------- questions and comment ----------
@@ -1481,6 +1508,7 @@
 	el.ackBtn.addEventListener("click", () => send("ack"));
 	el.listenBtn.hidden = !("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);
 	el.listenBtn.addEventListener("click", () => (reading ? stopListening() : startListening()));
+	el.restartBtn.addEventListener("click", () => startListening({ fromTop: true }));
 	el.stopFab.addEventListener("click", stopListening);
 	el.revBannerBtn.addEventListener("click", () => {
 		if (state.bannerRev != null) selectRev(state.bannerRev);
@@ -1503,6 +1531,8 @@
 		if (vv.open) vLayout(false);
 	});
 	document.addEventListener("visibilitychange", () => {
+		// Back on the page after the engine dropped the speech (a phone does in the background): show 이어 듣기, not a dead 멈추기.
+		if (document.visibilityState === "visible" && reading && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) stopListening();
 		if (document.visibilityState === "visible") poll();
 		else if (pollTimer) {
 			clearTimeout(pollTimer);

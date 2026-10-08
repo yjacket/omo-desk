@@ -176,6 +176,50 @@ try {
 	const b5 = await btn();
 	check("an interrupted piece keeps reading; a failed one stops and resets the button", b4.text === "멈추기" && b5.text === "듣기", fmt({ b4, b5 }));
 
+	// stopped partway, the next 듣기 goes on from the piece it was on; 처음부터 starts over
+	const resumeState = () => ev("({ text: document.getElementById('listenBtn').textContent, restart: !document.getElementById('restartBtn').hidden, fab: !document.getElementById('stopFab').hidden })");
+	const N = texts.length;
+	await ev("window.__spoken.length = 0");
+	await ev("document.getElementById('listenBtn').click()");
+	await fire(second, "onstart");
+	await ev("document.getElementById('listenBtn').click()");
+	const s1 = await resumeState();
+	check("멈추기 partway: the button says 이어 듣기 and 처음부터 appears", s1.text === "이어 듣기" && s1.restart && !s1.fab, fmt(s1));
+	await ev("scrollTo(0, 0)");
+	await shot("listen-390-resume.png");
+	const top2 = await ev("(() => { const b = document.getElementById('listenBtn').getBoundingClientRect(); const r = document.getElementById('restartBtn').getBoundingClientRect(); const h = document.getElementById('title').getBoundingClientRect(); return { b: { l: b.left, h: b.height, r: b.right }, r: { l: r.left, h: r.height, r: r.right }, h1r: h.right, doc: document.documentElement.scrollWidth }; })()");
+	check("390: 이어 듣기 and 처음부터 sit right of the title, at least 40 px tall, no horizontal overflow", top2.b.l >= top2.h1r && top2.r.l >= top2.b.r && top2.b.h >= 40 && top2.r.h >= 40 && top2.r.r <= 390 && top2.doc <= 390, fmt(top2));
+	await ev("window.__spoken.length = 0");
+	await ev("document.getElementById('listenBtn').click()");
+	const t5 = await spokenTexts();
+	const s2 = await resumeState();
+	check("이어 듣기 starts at the piece that was being read and reads to the end", t5[0] === "둘째 카드." && t5.length === N - second && t5[t5.length - 1] === "여기까지입니다." && s2.text === "멈추기" && !s2.restart, fmt({ head: t5.slice(0, 2), n: t5.length, s2 }));
+	// the engine failing partway keeps the place too
+	const longAt = t5.indexOf("긴 설명.");
+	await fire(longAt, "onstart");
+	await fire(longAt, "onerror", "{ error: 'synthesis-failed' }");
+	const s3 = await resumeState();
+	await ev("window.__spoken.length = 0");
+	await ev("document.getElementById('listenBtn').click()");
+	const t6 = await spokenTexts();
+	check("after an engine error, 이어 듣기 goes on from the failed piece", s3.text === "이어 듣기" && t6[0] === "긴 설명.", fmt({ s3, head: t6.slice(0, 2) }));
+	// back on the page after the engine dropped the speech: 이어 듣기, not a dead 멈추기
+	await fire(t6.indexOf("질문 1."), "onstart");
+	await ev("document.dispatchEvent(new Event('visibilitychange'))");
+	const s4 = await resumeState();
+	await ev("window.__spoken.length = 0");
+	await ev("document.getElementById('listenBtn').click()");
+	const t7 = await spokenTexts();
+	check("returning to the page after the engine went silent shows 이어 듣기, which goes on from there", s4.text === "이어 듣기" && s4.restart && t7[0] === "질문 1.", fmt({ s4, head: t7.slice(0, 2) }));
+	await ev("document.getElementById('listenBtn').click()");
+	await ev("window.__spoken.length = 0");
+	await ev("document.getElementById('restartBtn').click()");
+	const t8 = await spokenTexts();
+	check("처음부터 reads the whole proposal from the title", t8[0] === "읽어주기 QA." && t8.length === N, fmt({ head: t8.slice(0, 2), n: t8.length }));
+	await fire(N - 1, "onend");
+	const s5 = await resumeState();
+	check("reading to the end forgets the place: 듣기 again, no 처음부터", s5.text === "듣기" && !s5.restart, fmt(s5));
+
 	// ===== revision note and session reply come first =====
 	const rv = await fetch(`${base}/api/p/${id}/revise`, { method: "POST", headers: POST, body: JSON.stringify({ srcDir: src, note: "버튼을 키웠습니다", session: null }) });
 	await view.navigate(`${base}/p/${id}`);
@@ -193,16 +237,17 @@ try {
 	check("when the newest event is a session reply it starts with 세션 답, then 바뀐 점", rp.status === 200 && fmt(t3.slice(0, 5)) === fmt(["세션 답.", "답 글입니다.", "바뀐 점.", "버튼을 키웠습니다.", "읽어주기 QA."]), fmt(t3.slice(0, 5)));
 
 	// switching revision stops; revision 1 has no 바뀐 점
+	await fire(5, "onstart");
 	const c0 = await ev("window.__cancels");
 	await ev("document.querySelectorAll('#tabs button')[0].click()");
 	await waitFor("window.__vb.rev === 1", 15000, "rev 1");
-	const b6 = await btn();
+	const b6 = { ...(await btn()), restart: await ev("!document.getElementById('restartBtn').hidden") };
 	const c1 = await ev("window.__cancels");
 	await ready(3);
 	await ev("window.__spoken.length = 0");
 	await ev("document.getElementById('listenBtn').click()");
 	const t4 = await spokenTexts();
-	check("switching to 1안 stops reading; 1안 reads the reply but no 바뀐 점", c1 === c0 + 1 && b6.text === "듣기" && t4[0] === "세션 답." && t4[2] === "읽어주기 QA." && !t4.includes("바뀐 점."), fmt({ c0, c1, b6, head: t4.slice(0, 3) }));
+	check("switching to 1안 stops reading; 1안 reads the reply but no 바뀐 점", c1 === c0 + 1 && b6.text === "듣기" && !b6.restart && t4[0] === "세션 답." && t4[2] === "읽어주기 QA." && !t4.includes("바뀐 점."), fmt({ c0, c1, b6, head: t4.slice(0, 3) }));
 
 	// ===== desktop 1440, real engine =====
 	await cdp("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
