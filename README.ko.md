@@ -144,7 +144,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 
 - id는 `YYMMDD-xxxx`. JSON은 모두 임시 파일에 쓴 뒤 이름을 바꿉니다. 안은 `revs/<n>.tmp-<rand>` 에 복사한 뒤 다 되면 이름을 바꾸고, 색인 재구성은 `proposal.json` 이 없는 폴더와 `*.tmp-*` 폴더를 무시합니다.
 - 이벤트: `submitted`, `feedback`, `reply`, `revised`, `closed`. 1부터 번호를 매기고 재사용하지 않습니다. `submitted` 와 `revised` 는 내용 `hash` 를 가집니다.
-- 상태: `closed` 가 있으면 `closed`, 아니면 마지막이 `feedback` 일 때 `theirs`(세션 차례, 승인이면 `approved`), 그 외는 `mine`(내 차례).
+- 상태: `closed` 가 있으면 `closed`, 아니면 마지막이 `feedback` 일 때 `theirs`(내 의견이 세션을 기다리는 중, 승인이면 `approved`), 그 외는 `mine`(내 답을 기다리는 중). 화면에는 `끝남`, `🤖 처리 중`, `🙋 답 필요` 로 나옵니다.
 - 소유자는 세션 id가 있는 마지막 이벤트의 세션입니다.
 - `kind` 는 제출 때 `proposal.json` 에 쓰고 모든 요약에 `kind` 로 보입니다. 없는 기록은 `decision` 으로 읽습니다. revise는 kind를 유지하고, 보드의 kind가 다른 revise는 400 `bad_input` 입니다.
 - verdict: 결정 보드는 `change` 와 `approve`, 보고 보드는 `ack` 만(의견과 표시는 선택, 답 없음). 다른 조합은 400 `bad_input` 입니다. 의견도 표시도 없는 `ack` 은 의견 이벤트를 쓰고 같은 호출에서 `closed` 이벤트 `{ by: "user", summary: null }` 를 쓰며 우편함 파일은 쓰지 않습니다. 전달할 것이 없으므로 그 의견의 `delivery` 는 `none` 입니다. 의견이나 표시가 있는 `ack` 은 의견 이벤트만 씁니다. 상태는 `theirs` 가 되고, 평소의 우편함과 대기 알림 경로로 라우팅·전달되며, 소유 세션이나 다음 세션이 `desk close` 로 닫습니다.
@@ -213,7 +213,7 @@ Windows에서는 서버를 `Win32_Process.Create`(PowerShell, 숨김)로 만들�
 senpi 확장(`extension/omo-desk.ts`)은 하위 세션이나 task member 세션에서는 아무것도 하지 않습니다. 일반 세션에서는:
 
 - 3초마다 `<home>/inbox/<session>/*.json` 을 읽습니다. 기획안이 아직 `theirs` 이거나 서버에 닿지 않으면 문구를 턴을 시작하는 후속 메시지로 전달하고 파일을 지웁니다. 메모리의 집합이 중복 전달을 막습니다.
-- 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `보드 내 차례 {mine} · 세션 차례 {theirs}` 가 나옵니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `desk server start` 를 실행합니다.
+- 30초마다, 세션 시작 때, 전달 직후에 `/api/here` 를 부릅니다. 하단 표시줄에 `🙋 {mine} 🤖 {theirs}` 가 나오고, 0인 쪽은 뺍니다. 서버가 꺼져 있으면 `보드 서버 꺼짐` 을 보이고 120초에 한 번까지 `desk server start` 를 실행합니다.
 - 알림: 이 워크트리에서 기다리는 의견 중 소유 세션이 살아 있지 않은 것(90초 동안 `/api/here` 호출 없음, 종료, 하위 세션, id 없음)은 세션마다 한 번 알립니다. 재개된 세션은 시작할 때 자기에게 온 답 안 한 의견을 다시 안내받습니다.
 - 종료 때 `/api/bye` 를 불러 소유자가 바로 떠난 것으로 셉니다.
 - 기다리는 보드: `/api/here` 갱신이 성공할 때마다 답 시간 안의 `waiting` 보드를 senpi에 깨우기 출처 `omo-desk` 로 알리고(`wake_source_state` `{ source: "omo-desk", activeCount }`, 보류보다 먼저 보냄) goal 이어가기를 보류합니다(`continuation_hold_state` `{ source: "omo-desk", active }`). 이게 없으면 goal이 바로 다시 재촉하고, 에이전트는 보드를 질문 도구로 한 번 더 묻는데 보드 답으로는 그 질문이 풀리지 않습니다. senpi는 `source`/`activeCount` 와 `active` 만 읽습니다.
@@ -221,7 +221,7 @@ senpi 확장(`extension/omo-desk.ts`)은 하위 세션이나 task member 세션�
 - 답 시간은 senpi의 `askUser.timeoutMinutes`(기본 30)이고 1-120분으로 제한합니다. `since`, 곧 보드의 마지막 제출, 수정, 의견 이벤트부터 재며 세션 답장은 치지 않습니다. 질문 도구의 유휴 타이머와 달리 페이지를 봐도 다시 시작하지 않습니다. 읽을 수 없는 `since` 는 지난 것으로 칩니다. 상태가 `theirs` 인 보드는 항상 셉니다.
 - 도구 실행이 끝날 때마다 갱신도 합니다(한 번에 하나, 진행 중에 요청이 오면 한 번 더). 그래서 턴 중에 제출한 보드도 턴이 끝나기 전에 셉니다.
 - 무응답: `mine` 보드가 답 시간을 넘기면 세지 않고, 세션은 턴을 시작하는 후속 메시지 `[omo-desk] 답이 없습니다: <title> (<id>), <n>분` 을 보드와 마지막 이벤트 시각마다 한 번 받습니다. 세션 시작이나 reload 때 이미 답 시간이 지난 보드는 알리지 않습니다.
-- 보드를 세는 동안 senpi는 이를 백그라운드 작업으로 보므로 그 턴의 Stop hook은 답 턴까지 미뤄집니다(소유자에게는 omo-desk 푸시 알림이 알립니다). 보류 중에는 senpi가 goal 카운트다운을 보이지 않고, 하단 `보드 내 차례 N` 이 표시입니다. 하위 세션과 senpi가 아닌 세션은 보류도 알림도 받지 않습니다.
+- 보드를 세는 동안 senpi는 이를 백그라운드 작업으로 보므로 그 턴의 Stop hook은 답 턴까지 미뤄집니다(소유자에게는 omo-desk 푸시 알림이 알립니다). 보류 중에는 senpi가 goal 카운트다운을 보이지 않고, 하단 `🙋 N` 이 표시입니다. 하위 세션과 senpi가 아닌 세션은 보류도 알림도 받지 않습니다.
 - `/reload` 뒤에는 교체된 예전 확장 사본이 senpi가 자기 세대를 stale로 처음 알릴 때 타이머를 멈추므로, 지금 사본만 폴링하고 세션을 깨웁니다.
 
 세션 id는 `DESK_SESSION` 또는 `PI_SESSION_ID` 에서 옵니다. 보드 종류 때문에 확장이 바뀌지는 않습니다. 의견을 단 보고 확인을 포함해 `theirs` 보드는 이미 전달합니다.

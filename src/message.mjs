@@ -47,6 +47,5 @@ export function pendingNotice(items, cli) {
 }
 
 export function footerText({ mine, theirs }) {
-	if (!mine && !theirs) return "";
-	return `보드 내 차례 ${mine} · 세션 차례 ${theirs}`;
+	return [mine ? `🙋 ${mine}` : "", theirs ? `🤖 ${theirs}` : ""].filter(Boolean).join(" ");
 }

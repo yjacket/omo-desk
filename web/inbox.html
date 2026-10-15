@@ -13,7 +13,7 @@
 	<style>
 		/*
 		 * Design tokens (the DESIGN contract for this page).
-		 * Color: one locked accent (내 차례 chip, focus ring). State is ink at
+		 * Color: one locked accent (답 필요 chip, focus ring). State is ink at
 		 * alphas (washes), never a coloured border. Depth: borders only.
 		 * Radius: controls 8px, rows 10px, chips pill. Spacing: 4px base.
 		 */
@@ -329,8 +329,8 @@
 					<legend>상태</legend>
 					<div class="seg" id="status">
 						<label><input type="radio" name="status" value="open" checked><span>진행 중</span></label>
-						<label><input type="radio" name="status" value="mine"><span>내 차례</span></label>
-						<label><input type="radio" name="status" value="theirs"><span>세션 차례</span></label>
+						<label><input type="radio" name="status" value="mine"><span>🙋 답 필요</span></label>
+						<label><input type="radio" name="status" value="theirs"><span>🤖 처리 중</span></label>
 						<label><input type="radio" name="status" value="closed"><span>끝남</span></label>
 						<label><input type="radio" name="status" value="all"><span>전체</span></label>
 					</div>
@@ -349,7 +349,7 @@
 			"use strict";
 
 			const STATUSES = ["open", "mine", "theirs", "closed", "all"];
-			const CHIP = { mine: "내 차례", theirs: "세션 차례", closed: "끝남" };
+			const CHIP = { mine: "🙋 답 필요", theirs: "🤖 처리 중", closed: "끝남" };
 			const TYPE_LABEL = { submitted: "제출", feedback: "내 의견", reply: "세션 답", revised: "고친 안", closed: "끝남" };
 			const REFRESH_MS = 10000;
 			const SKELETON_DELAY_MS = 400;

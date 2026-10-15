@@ -19,7 +19,7 @@
 	const MIN_MARK_PX = 8;
 	const DEFAULT_HEADERS = { "content-type": "application/json", "x-desk": "1" };
 	const EVENT_LABELS = { submitted: "제출", feedback: "내 의견", reply: "세션 답", revised: "고친 안", closed: "끝남" };
-	const STATUS_LABELS = { mine: "내 차례", theirs: "세션 차례", closed: "끝남" };
+	const STATUS_LABELS = { mine: "🙋 답 필요", theirs: "🤖 처리 중", closed: "끝남" };
 	const PROMPT_HEAD = [
 		"나는 개발자다. 코딩 에이전트가 보여 준 검토 보드를 보고 있고, 잘 모르는 부분을 물어보고 결정하려 한다.",
 		"먼저 각 질문의 선택지 차이를 쉽게 설명하고 추천과 이유를 말해 줘. 내가 정하면 보드에 붙일 결론을 3줄 이내로 정리해 줘.",

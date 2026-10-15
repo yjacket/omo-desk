@@ -166,7 +166,7 @@ test("omo-task child sessions are inert: null, no handlers", () => {
 });
 
 test("session_start registers the 3 s/30 s timers and asks /api/here with start=1", async () => {
-	const s = setup({ here: { footer: "보드 내 차례 1 · 세션 차례 0", notice: null, noticeKeys: [] } });
+	const s = setup({ here: { footer: "🙋 1", notice: null, noticeKeys: [] } });
 	assert.equal(s.timers.length, 0);
 	await s.pi.emit("session_start", s.ctx);
 	assert.deepEqual(
@@ -175,7 +175,7 @@ test("session_start registers the 3 s/30 s timers and asks /api/here with start=
 	);
 	assert.equal(s.fetchCalls.length, 1);
 	assert.match(s.fetchCalls[0].url, /\/api\/here\?cwd=C%3A%2Fwork%2Fproj&session=s-1&start=1$/);
-	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "보드 내 차례 1 · 세션 차례 0"]);
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "🙋 1"]);
 	await s.tick(30000);
 	assert.equal(s.fetchCalls.length, 2);
 	assert.doesNotMatch(s.fetchCalls[1].url, /start=1/, "later ticks are not a session start");
@@ -544,7 +544,7 @@ test("a stale extension generation stops timers and logs once without a stack tr
 
 test("status announces new notice keys once, sets the footer, and clears it when empty", async () => {
 	const s = setup({
-		here: { footer: "보드 내 차례 0 · 세션 차례 1", notice: "notice-1", noticeKeys: ["261004-abcd:3"] },
+		here: { footer: "🤖 1", notice: "notice-1", noticeKeys: ["261004-abcd:3"] },
 	});
 	await s.pi.emit("session_start", s.ctx);
 	assert.equal(s.pi.sent.length, 1);
@@ -569,16 +569,16 @@ test("status announces new notice keys once, sets the footer, and clears it when
 });
 
 test("session_start without ctx.cwd falls back to pi.cwd for /api/here", async () => {
-	const s = setup({ cwd: null, piCwd: "C:/work/from-pi", here: { footer: "보드 내 차례 1 · 세션 차례 0", notice: null, noticeKeys: [] } });
+	const s = setup({ cwd: null, piCwd: "C:/work/from-pi", here: { footer: "🙋 1", notice: null, noticeKeys: [] } });
 	await s.pi.emit("session_start", s.ctx);
 	assert.equal(s.fetchCalls.length, 1);
 	assert.match(s.fetchCalls[0].url, /\/api\/here\?cwd=C%3A%2Fwork%2Ffrom-pi&session=s-1&start=1$/);
-	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "보드 내 차례 1 · 세션 차례 0"]);
+	assert.deepEqual(s.statuses.at(-1), ["omo-desk", "🙋 1"]);
 	s.cleanup();
 });
 
 test("without a UI the footer is not touched", async () => {
-	const s = setup({ hasUI: false, here: { footer: "보드 내 차례 1 · 세션 차례 0", notice: null, noticeKeys: [] } });
+	const s = setup({ hasUI: false, here: { footer: "🙋 1", notice: null, noticeKeys: [] } });
 	await s.pi.emit("session_start", s.ctx);
 	await s.tick(30000);
 	assert.equal(s.statuses.length, 0);

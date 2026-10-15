@@ -206,5 +206,10 @@ test("footerText is empty when both counts are zero", () => {
 });
 
 test("footerText reports both counts", () => {
-	assert.equal(footerText({ mine: 2, theirs: 1 }), "보드 내 차례 2 · 세션 차례 1");
+	assert.equal(footerText({ mine: 2, theirs: 1 }), "🙋 2 🤖 1");
+});
+
+test("footerText leaves out a zero count", () => {
+	assert.equal(footerText({ mine: 2, theirs: 0 }), "🙋 2");
+	assert.equal(footerText({ mine: 0, theirs: 1 }), "🤖 1");
 });

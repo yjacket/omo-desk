@@ -622,7 +622,7 @@ test("here counts only the current worktree, across clones and branches", async 
 	assert.equal(hereA.theirs, 0);
 	assert.deepEqual(hereA.pending, []);
 	assert.equal(hereA.notice, null);
-	assert.equal(hereA.footer, "보드 내 차례 1 · 세션 차례 0");
+	assert.equal(hereA.footer, "🙋 1");
 
 	const hereB = await (await fetch(`${ctx.base}/api/here?cwd=${encodeURIComponent(dirB)}&session=sB`)).json();
 	assert.equal(hereB.mine, 1);
