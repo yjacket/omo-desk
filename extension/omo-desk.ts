@@ -173,7 +173,8 @@ export function createDesk(pi, deps = {}) {
 		let confirmed;
 		try { confirmed = JSON.parse(await fsImpl.readFile(claimFile, "utf8")); } catch { return; }
 		if (confirmed.sha !== sha || confirmed.pid !== process.pid) return;
-		const child = spawnImpl(execPath, [path.join(source, "bin", "desk.mjs"), "install", "--from-package"], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
+		// omo may run on bun; install records its own runtime in the launcher, so it must run on node.
+		const child = spawnImpl(await resolveNode(), [path.join(source, "bin", "desk.mjs"), "install", "--from-package"], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
 		child?.unref?.();
 	});
 
@@ -513,7 +514,7 @@ export function createDesk(pi, deps = {}) {
 					commandCtx?.ui?.notify?.("사용법: /desk install | /desk uninstall", "info");
 					return;
 				}
-				const child = spawnImpl(execPath, [executable, ...cliArgs], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
+				const child = spawnImpl(await resolveNode(), [executable, ...cliArgs], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
 				child?.unref?.();
 				commandCtx?.ui?.notify?.(action === "install" ? "omo-desk 설치를 시작했습니다." : "omo-desk 제거를 시작했습니다.", "info");
 			},

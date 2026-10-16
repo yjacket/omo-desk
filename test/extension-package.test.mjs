@@ -8,7 +8,7 @@ import { createDesk } from "../extension/omo-desk.ts";
 const sha1 = "1111111111111111111111111111111111111111";
 const sha2 = "2222222222222222222222222222222222222222";
 
-async function setup({ packageMode = true, sha = sha1, state, setupOnly = false, loadedSha = sha, disabled = false, env = {}, fetch } = {}) {
+async function setup({ packageMode = true, sha = sha1, state, setupOnly = false, loadedSha = sha, disabled = false, env = {}, fetch, execPath } = {}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "desk-extension-package-"));
 	const source = path.join(root, "clone");
 	const home = path.join(root, "home");
@@ -34,7 +34,7 @@ async function setup({ packageMode = true, sha = sha1, state, setupOnly = false,
 	};
 	let now = 1_800_000_000_000;
 	const handle = createDesk(pi, {
-		packageMode, source, home, agentDir, loadedSha, env, fetch,
+		packageMode, source, home, agentDir, loadedSha, env, fetch, execPath, platform: "win32",
 		now: () => now,
 		timer: {
 			setInterval(fn, ms) { const timer = { fn, ms }; timers.push(timer); return timer; },
@@ -92,6 +92,17 @@ test("disabled marker and checkout channel prevent setup", async () => {
 	await checkout.tick();
 	assert.equal(checkout.spawned.length, 0);
 	await checkout.close();
+});
+
+test("setup and /desk run the CLI on node even when omo runs on bun", async () => {
+	const bin = await fs.mkdtemp(path.join(os.tmpdir(), "desk-node-bin-"));
+	await fs.writeFile(path.join(bin, "node.exe"), "");
+	const s = await setup({ sha: sha2, execPath: "C:\\tools\\bun.exe", env: { PATH: bin } });
+	await s.tick();
+	await s.commands.get("desk").handler("uninstall", {});
+	assert.deepEqual(s.spawned.map((entry) => entry.cmd), [path.join(bin, "node.exe"), path.join(bin, "node.exe")]);
+	await s.close();
+	await fs.rm(bin, { recursive: true, force: true });
 });
 
 test("a disabled package shows no footer and never asks the server", async () => {
