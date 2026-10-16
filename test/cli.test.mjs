@@ -193,7 +193,7 @@ test("reply and close print the status and the record line", async (t) => {
 
 	const reply = await runCli(ctx, ["reply", approved, "확인했습니다"]);
 	assert.equal(reply.code, 0, reply.stderr);
-	assert.equal(reply.stdout.trim(), `ok ${approved} mine`);
+	assert.equal(reply.stdout.trim(), `ok ${approved} theirs`);
 
 	const close = await runCli(ctx, ["close", approved, "완료"]);
 	assert.equal(close.code, 0, close.stderr);
@@ -758,8 +758,9 @@ test("real CLI, real server and real inbox: one followUp, dedupe and the status 
 	const second = await postJson(ctx.base, `/api/p/${id}/feedback`, { rev: 1, verdict: "change", comment: "second" });
 	const secondSeq = (await second.json()).seq;
 	const secondFile = path.join(inboxDir, `${id}-${String(secondSeq).padStart(6, "0")}.json`);
-	const reply = await runCli(ctx, ["reply", id, "다시 볼게요", "--session", "sess-A"], { env: STRIP_SESSION });
-	assert.equal(reply.code, 0, reply.stderr);
+	const revisedDir = makeBoard(path.join(ctx.repo, "reply-revision"));
+	const revised = await runCli(ctx, ["revise", id, revisedDir, "--session", "sess-A"], { env: STRIP_SESSION });
+	assert.equal(revised.code, 0, revised.stderr);
 	const detail = JSON.parse((await runCli(ctx, ["show", id, "--json"])).stdout);
 	assert.equal(detail.summary.status, "mine");
 	assert.ok(fs.existsSync(secondFile), "the second feedback is still waiting in the inbox");
@@ -777,7 +778,7 @@ test("real CLI, real server and real inbox: one followUp, dedupe and the status 
 		submit: { exit: submitted.code, owner: detail.summary.owner, id },
 		feedback: { status: fb.status, routed: fbBody.routed, delivery: fbBody.delivery, seq },
 		followUp: { count: followUps().length, details: followUps()[0].message.details, triggerTurn: followUps()[0].opts.triggerTurn },
-		statusGate: { replyExit: reply.code, status: detail.summary.status, followUpCount: followUps().length },
+		statusGate: { reviseExit: revised.code, status: detail.summary.status, followUpCount: followUps().length },
 		teardown: { timers: timers.length },
 	});
 });

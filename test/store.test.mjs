@@ -95,7 +95,7 @@ test("feedback validation rejects bad input with the right codes and accepts an 
 	}
 });
 
-test("approved is true only when the last event is an approving feedback", () => {
+test("approved is true only when the last non-reply event is an approving feedback", () => {
 	const { home, cleanup, store } = setup();
 	try {
 		const src = makeBoardDir(home, { questions: QUESTIONS });
@@ -107,7 +107,7 @@ test("approved is true only when the last event is an approving feedback", () =>
 		store.reply(id, { text: "thanks", session: { id: "s2", file: null } });
 		const afterReply = store.get(id).summary;
 		assert.equal(afterReply.lastType, "reply");
-		assert.equal(afterReply.approved, false);
+		assert.equal(afterReply.approved, true);
 
 		store.feedback(id, { rev: 1, verdict: "approve", answers: {}, comment: "", marks: [] });
 		assert.equal(store.get(id).summary.approved, true);
@@ -214,7 +214,7 @@ test("lifecycle statuses, owner movement and the closed guard", () => {
 
 		store.reply(id, { text: "ok", session: { id: "s2", file: null } });
 		summary = store.get(id).summary;
-		assert.equal(summary.status, "mine");
+		assert.equal(summary.status, "theirs");
 		assert.equal(summary.lastType, "reply");
 		assert.equal(summary.owner, "s2");
 
@@ -239,6 +239,39 @@ test("lifecycle statuses, owner movement and the closed guard", () => {
 		assert.equal(codeOf(() => store.reply(id, { text: "x", session: null })).code, "closed");
 		assert.equal(codeOf(() => store.revise(id, { srcDir: src, files: filesFor(), session: null })).code, "closed");
 		assert.equal(codeOf(() => store.close(id, { summary: "again", by: "me", session: null })).code, "closed");
+	} finally {
+		cleanup();
+	}
+});
+
+test("a reply never changes the status", () => {
+	const { home, cleanup, store } = setup();
+	try {
+		const src = makeBoardDir(home, { questions: QUESTIONS });
+		const create = (title) => store.create({ identity: ident(home), title, srcDir: makeBoardDir(home, { questions: QUESTIONS }), files: filesFor() }).summary.id;
+
+		const changedId = create("changed");
+		store.feedback(changedId, { rev: 1, verdict: "change", comment: "x", answers: {}, marks: [] });
+		store.reply(changedId, { text: "ok", session: { id: "s2", file: null } });
+		assert.equal(store.get(changedId).summary.status, "theirs");
+		assert.equal(store.get(changedId).summary.approved, false);
+
+		const approvedId = create("approved");
+		store.feedback(approvedId, { rev: 1, verdict: "approve", answers: {}, comment: "", marks: [] });
+		store.reply(approvedId, { text: "ok", session: { id: "s2", file: null } });
+		assert.equal(store.get(approvedId).summary.status, "theirs");
+		assert.equal(store.get(approvedId).summary.approved, true);
+
+		const submittedId = create("submitted");
+		store.reply(submittedId, { text: "ok", session: { id: "s2", file: null } });
+		assert.equal(store.get(submittedId).summary.status, "mine");
+
+		const revisedId = create("revised");
+		assert.equal(new Set([changedId, approvedId, submittedId, revisedId]).size, 4);
+		store.feedback(revisedId, { rev: 1, verdict: "change", comment: "x", answers: {}, marks: [] });
+		store.reply(revisedId, { text: "ok", session: { id: "s2", file: null } });
+		store.revise(revisedId, { srcDir: src, files: filesFor(), note: "v2", session: { id: "s3", file: null } });
+		assert.equal(store.get(revisedId).summary.status, "mine");
 	} finally {
 		cleanup();
 	}

@@ -80,7 +80,7 @@ test("change verdict maps answers to question text and option labels, marks carr
 			`표시 2 (상세): 여백이 좁아요 | 그림: ${CROPS}/crops/000009-2.png`,
 			"현재 안은 3안입니다 (이 의견은 2안 기준)",
 			`보기: ${URL}`,
-			`처리: ${CLI} show 240101-abcd 로 전체를 읽고 ${CLI} reply / revise / close 로 답하세요.`,
+			`처리: ${CLI} show 240101-abcd 로 전체를 읽고 ${CLI} revise 로 수정안을 올리세요. 재요청은 승인이 아닙니다: 확정하거나 작업을 시작하지 마세요.`,
 		].join("\n"),
 	);
 });
@@ -165,6 +165,15 @@ test("the 처리 line embeds the given cli prefix verbatim", () => {
 		cli: other,
 	});
 	assert.ok(text.endsWith(`${other} show 240101-abcd 로 전체를 읽고 ${other} reply / revise / close 로 답하세요.`));
+});
+
+test("only a change verdict narrows the 처리 line to revise", () => {
+	const last = (verdict) =>
+		feedbackMessage({ summary, board, event: { seq: 11, rev: 3, verdict, answers: {}, comment: "x", marks: [] }, url: URL, cropDir: CROPS, cli: CLI }).split("\n").at(-1);
+	assert.ok(last("change").includes(`${CLI} revise `), last("change"));
+	assert.equal(last("change").includes("reply"), false);
+	assert.ok(last("approve").includes("reply / revise / close"), last("approve"));
+	assert.ok(last("ack").includes("reply / revise / close"), last("ack"));
 });
 
 test("an ack on a report board reads 확인 and labels the revision as an update", () => {

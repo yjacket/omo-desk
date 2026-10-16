@@ -33,7 +33,11 @@ export function feedbackMessage({ summary, board, event, url, cropDir, cli }) {
 		lines.push(`현재 안은 ${revLabel(summary, summary.rev)}입니다 (이 의견은 ${revLabel(summary, event.rev)} 기준)`);
 	}
 	if (url) lines.push(`보기: ${url}`);
-	lines.push(`처리: ${cli} show ${summary.id} 로 전체를 읽고 ${cli} reply / revise / close 로 답하세요.`);
+	if (event.verdict === "change") {
+		lines.push(`처리: ${cli} show ${summary.id} 로 전체를 읽고 ${cli} revise 로 수정안을 올리세요. 재요청은 승인이 아닙니다: 확정하거나 작업을 시작하지 마세요.`);
+	} else {
+		lines.push(`처리: ${cli} show ${summary.id} 로 전체를 읽고 ${cli} reply / revise / close 로 답하세요.`);
+	}
 	return lines.join("\n");
 }
 

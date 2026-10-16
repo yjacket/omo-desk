@@ -32,6 +32,8 @@
 		chips: $("chips"),
 		title: $("title"),
 		lead: $("lead"),
+		causeCard: $("causeCard"),
+		cause: $("cause"),
 		listenBtn: $("listenBtn"),
 		restartBtn: $("restartBtn"),
 		tabs: $("tabs"),
@@ -304,6 +306,7 @@
 		await loadBoard(n);
 		if (state.rev !== n) return;
 		renderTabs();
+		renderCause();
 		renderDecide();
 		renderMarks();
 		updateMode();
@@ -1014,14 +1017,26 @@
 		return out;
 	}
 
+	// A row of 이 안이 나온 이유 for the ear: who, then what was said. A revise without a note says nothing.
+	function spokenEvent(ev) {
+		if (ev.type === "feedback") {
+			const marks = (ev.marks || []).map((mark) => mark.comment);
+			return spoken("내 의견", ...answerLines(ev), ev.comment, ...marks);
+		}
+		if (ev.type === "reply") return spoken("세션 답", ev.text);
+		return ev.note ? spoken("바뀐 점", ev.note) : "";
+	}
+
 	// What 듣기 reads, in order, each with the node to outline and bring into view while it is read.
 	function listenParts() {
 		const board = state.boards[state.rev] || {};
 		const parts = [];
 		const newest = state.events[state.events.length - 1];
 		if (newest && newest.type === "reply" && newest.text) parts.push({ text: spoken("세션 답", newest.text), node: null });
-		const revised = state.events.find((ev) => ev.type === "revised" && ev.rev === state.rev);
-		if (revised && revised.note) parts.push({ text: spoken("바뀐 점", revised.note), node: null });
+		for (const ev of causeEvents()) {
+			const text = spokenEvent(ev);
+			if (text) parts.push({ text, node: el.causeCard });
+		}
 		parts.push({ text: spoken(state.summary.title), node: el.title });
 		if (board.lead) parts.push({ text: spoken(board.lead), node: el.lead });
 		const groups = el.sections.querySelectorAll("section.group");
@@ -1208,6 +1223,38 @@
 		for (const ev of list) el.thread.appendChild(eventNode(ev));
 	}
 
+	// ---------- why this revision ----------
+
+	// What led to the revision on screen, in order: the feedback and replies after the previous revision opened, then its revise event.
+	// Nothing for revision 1, or when nothing was said before it and its revise note is empty.
+	function causeEvents() {
+		const n = state.rev;
+		if (n < 2) return [];
+		const opened = state.events.findIndex((ev) => (ev.type === "submitted" || ev.type === "revised") && ev.rev === n - 1);
+		const revised = state.events.findIndex((ev) => ev.type === "revised" && ev.rev === n);
+		if (revised === -1) return [];
+		const said = state.events.slice(opened + 1, revised).filter((ev) => ev.type === "feedback" || ev.type === "reply");
+		if (!said.length && !state.events[revised].note) return [];
+		return [...said, state.events[revised]];
+	}
+
+	// The card's rows are 대화 rows. Feedback rows name questions and options from the board they answered, so that board is loaded first.
+	async function renderCause() {
+		const n = state.rev;
+		const rows = causeEvents();
+		if (!rows.length) {
+			el.causeCard.hidden = true;
+			return;
+		}
+		if (!state.boards[n - 1]) await loadBoard(n - 1);
+		if (state.rev !== n) return;
+		const heading = el.causeCard.querySelector("h3");
+		if (heading) heading.textContent = isReport() ? "이 갱신이 나온 이유" : "이 안이 나온 이유";
+		el.cause.innerHTML = "";
+		for (const ev of rows) el.cause.appendChild(eventNode(ev));
+		el.causeCard.hidden = false;
+	}
+
 	// ---------- data flow ----------
 
 	function absorb(data) {
@@ -1236,6 +1283,7 @@
 				state.outcome = ev.summary ?? null;
 			}
 		}
+		renderCause();
 		renderHeader();
 		updateMode();
 	}

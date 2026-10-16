@@ -173,9 +173,16 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 
 	function statusOf(entry) {
 		if (entry.events.some((event) => event.type === "closed")) return "closed";
-		const last = entry.events[entry.events.length - 1];
+		const last = lastNonReplyEvent(entry);
 		if (last && last.type === "feedback") return "theirs";
 		return "mine";
+	}
+
+	function lastNonReplyEvent(entry) {
+		for (let i = entry.events.length - 1; i >= 0; i--) {
+			if (entry.events[i].type !== "reply") return entry.events[i];
+		}
+		return undefined;
 	}
 
 	function ownerOf(entry) {
@@ -198,7 +205,8 @@ export function createStore({ dataDir, inboxDir, now = () => new Date(), rand } 
 	function summaryOf(entry) {
 		const { proposal, events } = entry;
 		const last = events[events.length - 1];
-		const approved = last !== undefined && last.type === "feedback" && last.verdict === "approve";
+		const statusEvent = lastNonReplyEvent(entry);
+		const approved = statusEvent !== undefined && statusEvent.type === "feedback" && statusEvent.verdict === "approve";
 		const closed = events.find((event) => event.type === "closed");
 		return {
 			id: proposal.id,

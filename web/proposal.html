@@ -15,7 +15,7 @@
 		--mark:#1463ff;--mark-fill:rgba(20,99,255,.10);--mark-tint:rgba(20,99,255,.12);--mark-glow:rgba(20,99,255,.35);
 		--side-bg:#f0f6ff;--side-line:#c7dcff;--side-ink:#1d3a6b;
 		--rec-bg:#e7f6ec;--rec-ink:#1f7a45;
-		--dark:#0f1115;--dark-ink:#d6deeb;--dark-accent:#7ee2a8;
+		--chat-bg:#b2c7da;--chat-mine:#fee500;--chat-ink:#191919;--chat-meta:#33445a;--chat-line:rgba(0,0,0,.42);
 		--shadow-panel:0 12px 32px rgba(16,24,40,.18);--shadow-fab:0 6px 18px var(--mark-glow);
 		--r-xs:3px;--r-sm:7px;--r-md:10px;--r-lg:14px;--r-pill:999px;
 		--s-1:4px;--s-2:8px;--s-3:10px;--s-4:12px;--s-5:14px;--s-6:18px;--s-7:20px;--s-8:24px;--s-9:32px;
@@ -49,6 +49,8 @@
 	.listen[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
 	.card.reading{box-shadow:0 0 0 3px var(--mark)}
 	.lead{margin:0;color:var(--muted)}
+	/* 이 안이 나온 이유 sits between the title and the lead; the lead has no margin of its own, so the card keeps the usual card gap below it. */
+	#causeCard{margin-bottom:var(--s-5)}
 	.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--s-5)}
 	.tabs button{border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);border-radius:var(--r-pill);padding:5px var(--s-5);font-size:var(--fs-sm);font-weight:700;cursor:pointer}
 	.tabs button[aria-selected="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
@@ -124,23 +126,24 @@
 	.send button:disabled{opacity:.5;cursor:default}
 	#status{color:var(--muted);font-size:var(--fs-md)}
 
-	/* Conversation */
-	.thread{list-style:none;margin:var(--s-3) 0 0;padding:0;display:grid;gap:var(--s-4)}
-	.ev{border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s-3) var(--s-4)}
-	.ev.feedback{background:var(--side-bg);border-color:var(--side-line)}
-	.ev.reply{background:var(--dark);border-color:var(--dark);color:var(--dark-ink)}
-	.ev.closed{background:var(--fill)}
-	.evh{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);font-size:var(--fs-sm);color:var(--muted)}
-	.who{font-weight:700;color:var(--ink)}
-	.ev.feedback .who{color:var(--side-ink)}
-	.ev.reply .who{color:var(--dark-accent)}
-	.ev.reply .evh{color:var(--faint)}
-	.tag{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-2)}
+	/* Conversation: a chat. Your feedback is a yellow bubble on the right, a session reply a white one on the left, the rest a centered line. */
+	.thread{list-style:none;margin:var(--s-3) 0 0;padding:var(--s-5) var(--s-4);display:grid;gap:var(--s-4);background:var(--chat-bg);border-radius:var(--r-lg)}
+	.ev{display:flex;flex-direction:column;align-items:center;min-width:0}
+	.ev.feedback{align-items:flex-end}
+	.ev.reply{align-items:flex-start}
+	.evh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--chat-meta)}
+	.who{font-weight:700;color:var(--chat-ink)}
+	.ev.feedback .who{display:none}
+	.ev.reply .who::before{content:"🤖 "}
+	.tag{background:rgba(255,255,255,.7);border-radius:var(--r-pill);padding:0 var(--s-2);font-size:var(--fs-xs);color:var(--ink-2)}
 	.verdict{font-weight:700;color:var(--ink)}
-	.verdict.approve{color:var(--rec-ink)}
-	.when{margin-left:auto}
-	.evb{margin-top:6px;font-size:var(--fs-md);white-space:pre-wrap;overflow-wrap:anywhere}
+	.verdict.approve{background:var(--rec-bg);color:var(--rec-ink);border-radius:var(--r-pill);padding:0 var(--s-2)}
+	.evb{margin-top:var(--s-1);padding:var(--s-2) var(--s-4);border-radius:var(--r-lg);max-width:78%;font-size:var(--fs-md);line-height:1.5;color:var(--chat-ink);white-space:pre-wrap;overflow-wrap:anywhere}
 	.evb:empty{display:none}
+	.evb:has(.crops){width:78%}
+	.ev.feedback .evb{background:var(--chat-mine);border-top-right-radius:var(--r-xs)}
+	.ev.reply .evb{background:var(--surface);border-top-left-radius:var(--r-xs)}
+	.ev.submitted .evb,.ev.revised .evb,.ev.closed .evb{background:var(--chat-line);color:#fff;border-radius:var(--r-pill);padding:var(--s-1) var(--s-5);font-size:var(--fs-sm);text-align:center;max-width:90%}
 	.evb ul{margin:0 0 var(--s-1);padding-left:var(--s-6);white-space:normal}
 	.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--s-3);margin-top:var(--s-2);white-space:normal}
 	.crops figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:6px}
@@ -191,8 +194,7 @@
 		.chips{margin-left:0}
 		.chip span{max-width:180px}
 		.card,.frame,.mark,.ev{flex:none}
-		.crops{grid-template-columns:1fr 1fr}
-		.when{margin-left:0}
+		.crops{grid-template-columns:1fr}
 	}
 </style>
 </head>
@@ -203,6 +205,10 @@
 		<div class="chips" id="chips"></div>
 	</nav>
 	<div class="titlebar"><h1 id="title"></h1><button type="button" class="listen" id="listenBtn" aria-pressed="false" hidden>듣기</button><button type="button" class="listen" id="restartBtn" hidden>처음부터</button></div>
+	<section class="card" id="causeCard" hidden>
+		<h3 class="only">이 안이 나온 이유</h3>
+		<ol class="thread" id="cause"></ol>
+	</section>
 	<p class="lead" id="lead"></p>
 	<div class="tabs" id="tabs" role="tablist" aria-label="안"></div>
 	<div class="banner error" id="loadError" hidden></div>
