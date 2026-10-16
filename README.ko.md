@@ -15,7 +15,23 @@
 
 ## 설치
 
-Windows PowerShell 한 줄로 checkout 없이 GitHub `main` 에서 설치하거나 업데이트합니다. 저장소가 비공개라 `gh` 로그인(`gh auth login`)이 필요하고, Node 24 이상이어야 합니다:
+주된 설치 방법은 omo 패키지입니다. 저장소가 비공개라 git이 접근할 수 있어야 합니다:
+
+```powershell
+omo install git:github.com/yjacket/omo-desk
+```
+
+첫 omo 세션이 1분쯤 안에 스스로 설치합니다. 확장이 잠금(`<home>/setup.lock`) 아래 백그라운드에서 `desk install --from-package` 를 실행합니다. 설치는 clone을 `<home>/app` 으로 복사하고, `<home>/app/source.json`(channel `package`, source, sha, version), 실행기, Run 자동 시작 값, 스킬 사본, 규칙, tailscale 4378 serve 핸들러(443 보호 장치 포함)를 쓴 뒤 서버를 시작합니다. 세션이 몇 개 시작하든 설치는 하나만 돕니다. 실패한 설치는 10분 뒤 다시 시도합니다. 상태는 `<home>/setup-state.json` 에 있고, 실행마다 `<home>/logs/install.log` 에 한 줄을 남깁니다.
+
+업데이트는 `omo update --extensions` 입니다. 1분쯤 안에 다음 세션 주기가 앱을 바꾸고 서버를 다시 시작하며, 쉬고 있는 세션은 새 확장으로 reload 합니다.
+
+제거는 두 단계입니다. 먼저 `/desk uninstall`: 서버, 자동 시작, 실행기, 앱, 스킬, 규칙, 4378 핸들러를 지우고, `<home>/data` 는 남기며, 패키지가 움직이지 않도록 `<home>/disabled` 를 씁니다. 이 파일이 있는 동안 세션은 상태줄을 띄우지 않고, 설치나 서버 시작도 하지 않습니다. 그다음 `omo remove git:github.com/yjacket/omo-desk`. `/desk install` 은 꺼진 패키지를 다시 켭니다. `/desk uninstall` 없이 패키지를 지우면 서버가 clone이 사라진 것을 알아채고 20분 뒤 스스로 제거합니다(`DESK_ORPHAN_GRACE_MS`).
+
+이전. 예전에 `install.ps1` 이나 `desk install` 로 한 설치는 패키지가 넘겨받습니다. 예전 `<agentDir>/extensions/omo-desk.ts` 사본이 있는 동안 패키지 확장은 설치만 실행합니다. 설치가 예전 사본을 지우면 세션이 reload 합니다.
+
+개발자 설치. checkout 에서 `desk install`(또는 `install.ps1`)도 그대로 되며 `source.json` 에 channel `checkout` 을 기록합니다. 패키지는 이것을 덮어쓰지 않습니다. 패키지로 넘기려면 `desk uninstall` 을 실행합니다.
+
+Windows PowerShell 한 줄로 checkout 없이 GitHub `main` 에서 개발자 설치를 합니다. `gh` 로그인(`gh auth login`)이 필요하고, Node 24 이상이어야 합니다:
 
 ```powershell
 irm https://raw.githubusercontent.com/yjacket/omo-desk/main/install.ps1 -Headers @{ Authorization = "token $(gh auth token)" } | iex
@@ -41,20 +57,24 @@ checkout 에서:
 | 1 | `app` | `<home>/app` 을 지우고 `bin src web extension skill rules package.json` 을 복사. |
 | 2 | `launcher` | `<home>/launch-hidden.vbs` 작성. node를 `--max-semi-space-size=1 --max-old-space-size=128` 로 `<home>\app\src\server.mjs` 에 대해 숨김 실행. |
 | 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `omo-desk` = `wscript.exe "<home>\launch-hidden.vbs"`. |
-| 4 | `extension` | `<agentDir>/extensions/omo-desk.ts` 로 복사. |
+| 4 | `extension` | `<agentDir>/extensions/omo-desk.ts` 로 복사. 패키지 설치는 대신 그 예전 사본을 지움(`legacy removed\|absent`). |
 | 5 | `skill` | `~/.agents/skills/visual-board/` 와 `~/.claude/skills/visual-board/` 를 `<app>/skill/` 로 교체. |
 | 6 | `rule` | `rules/visual-board.md` 를 `~/.claude/rules/visual-board.md` 로 복사. |
 | 7 | `config` | `tailscale status --json` 에서 `publicBase`, `pcTailnetIps`, `owner` 를 읽음. tailscale이 없거나 Running이 아니면 `null`, `[]`, `null`. |
 | 8 | `tailscale` | 443 보호 장치와 함께 4378 serve 핸들러 추가(Tailnet 참고). |
 | 9 | `server` | `launchServer()` 로 시작하고 `/api/health` 를 기다림(최대 10초). |
 
+패키지 설치가 `<home>/app` 에 같은 sha가 이미 있으면 아무것도 하지 않고 `app: current` 를 출력합니다. 서버가 꺼져 있으면 확장이 시작합니다.
+
 마지막 줄은 `열린 omo 세션에서 /reload 하면 확장이 반영됩니다.` 입니다.
 
-`<home>` 은 `OMO_DESK_HOME` 또는 `~/.omo-desk`. `<agentDir>` 은 `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` 또는 `~/.omo/agent`.
+`<home>` 은 `OMO_DESK_HOME` 또는 `~/.omo-desk`. `<agentDir>` 은 `DESK_AGENT_DIR`, `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` 또는 `~/.omo/agent`.
 
-`desk uninstall` 은 서버를 끄고, Run 값을 지우고, 확장, 스킬 폴더 두 개, 규칙을 지우고, 같은 보호 장치로 4378 핸들러를 끄고, `<home>/app`, 실행기, `config.json`, `server.json` 을 지웁니다. `<home>/data` 는 남기고 `data kept: <path>` 를 출력합니다.
+`desk uninstall` 은 서버를 끄고, Run 값을 지우고, 확장, 스킬 폴더 두 개, 규칙을 지우고, 같은 보호 장치로 4378 핸들러를 끄고, `<home>/app`, 실행기, `config.json`, `server.json` 을 지웁니다. `<home>/data` 는 남기고 `data kept: <path>` 를 출력합니다. 지운 앱이 패키지 설치였으면 `<home>/disabled` 도 씁니다.
 
-`desk doctor` 는 health, Run 값, 실행기, 앱 사본과 같은 확장, 스킬과 규칙 존재, 4378 핸들러 존재, AllowFunnel에 4378 키 없음, 현재 443 Web 항목과 AllowFunnel이 `config.baseline443` 과 같은지 확인합니다. `<check>: ok|fail <detail>` 을 출력하고 모두 ok일 때만 0으로 끝납니다.
+테스트와 격리 환경용 덮어쓰기: `DESK_USER_HOME`(사용자 home, 기본 `os.homedir()`), `DESK_RUN_VALUE`(Run 값 이름, 기본 `omo-desk`), `DESK_NO_TAILSCALE=1`(install, uninstall, doctor가 tailscale 호출을 모두 건너뜀), `DESK_AGENT_DIR`(`<agentDir>` 로 가장 먼저 확인), `DESK_ORPHAN_GRACE_MS`(주인 없는 서버의 자동 제거 지연, 기본 20분).
+
+`desk doctor` 는 health, Run 값, 실행기, 앱 사본과 같은 확장(패키지 설치면 clone의 `extension/omo-desk.ts` 가 앱 사본과 같고 예전 `<agentDir>/extensions/omo-desk.ts` 가 없어야 함), 스킬과 규칙 존재, 4378 핸들러 존재, AllowFunnel에 4378 키 없음, 현재 443 Web 항목과 AllowFunnel이 `config.baseline443` 과 같은지 확인합니다. `<check>: ok|fail <detail>` 을 출력하고 모두 ok일 때만 0으로 끝납니다.
 
 ## 사용법 (CLI 표)
 

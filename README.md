@@ -15,7 +15,23 @@ A local review inbox for visual proposals. An omo agent session submits a board 
 
 ## Install
 
-One line in Windows PowerShell installs or updates from GitHub `main` without a checkout. The repository is private, so `gh` must be logged in (`gh auth login`), and Node 24+ is required:
+The main way is the omo package. The repository is private, so git needs access to it:
+
+```powershell
+omo install git:github.com/yjacket/omo-desk
+```
+
+The first omo session sets up by itself within about a minute. The extension runs `desk install --from-package` in the background under a lock (`<home>/setup.lock`). Setup copies the clone to `<home>/app`, writes `<home>/app/source.json` (channel `package`, source, sha, version), the launcher, the Run autostart value, the skill copies, the rule and the tailscale 4378 serve handler (behind the 443 guard), then starts the server. Only one setup runs however many sessions start. A failed setup is retried after 10 minutes; the state is in `<home>/setup-state.json` and each run leaves a line in `<home>/logs/install.log`.
+
+Update with `omo update --extensions`. Within about a minute the next session tick replaces the app and restarts the server, and idle sessions reload onto the new extension.
+
+Remove in two steps. First `/desk uninstall`: it removes the server, autostart, launcher, app, skills, rule and the 4378 handler, keeps `<home>/data`, and writes `<home>/disabled` so the package stays inert: while it exists, sessions show no footer and never set up or start the server. Then `omo remove git:github.com/yjacket/omo-desk`. `/desk install` re-enables a disabled package. If the package is removed without `/desk uninstall`, the server notices the missing clone and uninstalls itself after 20 minutes (`DESK_ORPHAN_GRACE_MS`).
+
+Migration. An earlier install made by `install.ps1` or `desk install` is taken over. While the old `<agentDir>/extensions/omo-desk.ts` copy exists, the package extension only runs setup. Setup deletes the old copy and sessions reload.
+
+Developer install. `desk install` from a checkout (or `install.ps1`) still works and records channel `checkout` in `source.json`. The package never overrides it. Run `desk uninstall` to hand over to the package.
+
+One line in Windows PowerShell installs from GitHub `main` without a checkout, as a developer install. `gh` must be logged in (`gh auth login`), and Node 24+ is required:
 
 ```powershell
 irm https://raw.githubusercontent.com/yjacket/omo-desk/main/install.ps1 -Headers @{ Authorization = "token $(gh auth token)" } | iex
@@ -41,20 +57,24 @@ Steps, in order, each reporting `written | unchanged | skipped | failed:<reason>
 | 1 | `app` | Delete `<home>/app`, copy `bin src web extension skill rules package.json` into it. |
 | 2 | `launcher` | Write `<home>/launch-hidden.vbs`, which runs node with `--max-semi-space-size=1 --max-old-space-size=128` on `<home>\app\src\server.mjs`, hidden. |
 | 3 | `autostart` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `omo-desk` = `wscript.exe "<home>\launch-hidden.vbs"`. |
-| 4 | `extension` | Copy to `<agentDir>/extensions/omo-desk.ts`. |
+| 4 | `extension` | Copy to `<agentDir>/extensions/omo-desk.ts`. A package setup instead removes that old copy (`legacy removed\|absent`). |
 | 5 | `skill` | Replace `~/.agents/skills/visual-board/` and `~/.claude/skills/visual-board/` with `<app>/skill/`. |
 | 6 | `rule` | Copy `rules/visual-board.md` to `~/.claude/rules/visual-board.md`. |
 | 7 | `config` | Read `tailscale status --json` into `publicBase`, `pcTailnetIps`, `owner`. Tailscale missing or not Running gives `null`, `[]`, `null`. |
 | 8 | `tailscale` | Add the 4378 serve handler with the 443 guard (see Tailnet). |
 | 9 | `server` | Start with `launchServer()` and wait for `/api/health` (up to 10 s). |
 
+A package setup that finds the same sha already in `<home>/app` does nothing and prints `app: current`. The extension starts the server if it is down.
+
 The last line is `열린 omo 세션에서 /reload 하면 확장이 반영됩니다.` Run `/reload` in open omo sessions.
 
-`<home>` is `OMO_DESK_HOME` or `~/.omo-desk`. `<agentDir>` is `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` or `~/.omo/agent`.
+`<home>` is `OMO_DESK_HOME` or `~/.omo-desk`. `<agentDir>` is `DESK_AGENT_DIR`, `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR` or `~/.omo/agent`.
 
-`desk uninstall` shuts the server down, deletes the Run value, removes the extension, both skill dirs and the rule, turns the 4378 handler off with the same guard, removes `<home>/app`, the launcher, `config.json` and `server.json`. It keeps `<home>/data` and prints `data kept: <path>`.
+`desk uninstall` shuts the server down, deletes the Run value, removes the extension, both skill dirs and the rule, turns the 4378 handler off with the same guard, removes `<home>/app`, the launcher, `config.json` and `server.json`. It keeps `<home>/data` and prints `data kept: <path>`. When the removed app was a package install, it also writes `<home>/disabled`.
 
-`desk doctor` checks health, the Run value, the launcher, the extension matching the app copy, skill and rule present, the 4378 handler present, no 4378 key in AllowFunnel, and the current 443 Web entry and AllowFunnel deep-equal `config.baseline443`. It prints `<check>: ok|fail <detail>` and exits 0 only when every check is ok.
+Overrides for tests and sandboxes: `DESK_USER_HOME` (user home, default `os.homedir()`), `DESK_RUN_VALUE` (Run value name, default `omo-desk`), `DESK_NO_TAILSCALE=1` (install, uninstall and doctor skip every tailscale call), `DESK_AGENT_DIR` (checked first for `<agentDir>`), `DESK_ORPHAN_GRACE_MS` (orphan uninstall delay, default 20 minutes).
+
+`desk doctor` checks health, the Run value, the launcher, the extension matching the app copy (for a package install: the clone's `extension/omo-desk.ts` equals the app copy and the old `<agentDir>/extensions/omo-desk.ts` is absent), skill and rule present, the 4378 handler present, no 4378 key in AllowFunnel, and the current 443 Web entry and AllowFunnel deep-equal `config.baseline443`. It prints `<check>: ok|fail <detail>` and exits 0 only when every check is ok.
 
 ## Use (CLI table)
 

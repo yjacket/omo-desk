@@ -22,7 +22,7 @@ const USAGE = [
 	"  pending [--session id] [--session-file path]",
 	"  wait <id> [--timeout sec]",
 	"  server status|start|stop|restart",
-	"  install [--no-tailscale] [--no-autostart] | uninstall | doctor",
+	"  install [--from-package] [--no-tailscale] [--no-autostart] | uninstall | doctor",
 ].join("\n");
 
 const VALUE_FLAGS = new Set(["title", "note", "file", "timeout", "product", "feature", "status", "session", "session-file"]);
@@ -461,6 +461,7 @@ async function cmdInstall(rest, json) {
 	const { flags } = parse(rest);
 	const mod = await import("./install.mjs");
 	const result = await mod.install({
+		fromPackage: flags.get("from-package") === true,
 		noTailscale: flags.get("no-tailscale") === true,
 		noAutostart: flags.get("no-autostart") === true,
 	});

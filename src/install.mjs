@@ -11,6 +11,9 @@ import { SERVE_PROXY, guard, parseServe, serveOff, serveOn, status } from "./tai
 export const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 export const RUN_VALUE = "omo-desk";
 export const RELOAD_HINT = "열린 omo 세션에서 /reload 하면 확장이 반영됩니다.";
+export function runValueName(env = process.env) {
+	return env.DESK_RUN_VALUE || RUN_VALUE;
+}
 
 const APP_ENTRIES = ["bin", "src", "web", "extension", "skill", "rules", "package.json"];
 const STOP_TIMEOUT_MS = 5_000;
@@ -36,7 +39,7 @@ function resolve(opts) {
 	return {
 		env,
 		repoRoot: opts.repoRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
-		userHome: opts.userHome ?? os.homedir(),
+		userHome: opts.userHome ?? env.DESK_USER_HOME ?? os.homedir(),
 		execPath: opts.execPath ?? process.execPath,
 		fetchImpl: opts.fetch ?? globalThis.fetch,
 		now: opts.now ?? Date.now,
@@ -45,6 +48,7 @@ function resolve(opts) {
 			reg: opts.runners?.reg ?? defaultReg,
 			tailscale: opts.runners?.tailscale ?? defaultTailscale,
 			spawn: opts.runners?.spawn ?? spawn,
+			git: opts.runners?.git ?? ((args, options) => spawnSync("git", args, { ...options, windowsHide: true, encoding: "utf8" })),
 		},
 	};
 }
@@ -155,17 +159,17 @@ export function launcherContent({ nodeExe, serverPath }) {
 	].join("\r\n");
 }
 
-export function readRunValue(regRunner) {
+export function readRunValue(regRunner, valueName = RUN_VALUE) {
 	let result;
 	try {
-		result = regRunner(["query", RUN_KEY, "/v", RUN_VALUE]);
+		result = regRunner(["query", RUN_KEY, "/v", valueName]);
 	} catch {
 		return undefined;
 	}
 	if (!result || result.status !== 0) return undefined;
 	const line = String(result.stdout ?? "")
 		.split(/\r?\n/)
-		.find((candidate) => candidate.includes(RUN_VALUE) && candidate.includes("REG_"));
+		.find((candidate) => candidate.includes(valueName) && candidate.includes("REG_"));
 	if (!line) return undefined;
 	return line.replace(/^\s*\S+\s+REG_\w+\s+/, "").trim();
 }
@@ -202,8 +206,66 @@ async function waitUntil(check, { timeoutMs, now, sleep }) {
 // ---- install -------------------------------------------------------------------------------------
 
 export async function install(opts = {}) {
-	const { env, repoRoot, userHome, execPath, fetchImpl, now, sleep, runners } = resolve(opts);
+	const resolved = resolve(opts);
+	const { env, userHome, execPath, fetchImpl, now, sleep, runners } = resolved;
+	const repoRoot = opts.repoRoot ?? resolved.repoRoot;
 	const l = layout(env);
+	if (opts.fromPackage) {
+		const lock = path.join(l.home, "setup.lock");
+		fs.mkdirSync(l.home, { recursive: true });
+		let acquired = false;
+		try {
+			try {
+				const fd = fs.openSync(lock, "wx");
+				fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedMs: now() }));
+				fs.closeSync(fd);
+				acquired = true;
+			} catch (error) {
+				if (error.code !== "EEXIST") throw error;
+				const holder = readJsonSafe(lock);
+				let alive = false;
+				if (Number.isInteger(holder?.pid) && holder.pid > 0) {
+					try { process.kill(holder.pid, 0); alive = true; } catch {}
+				}
+				if (alive && Number.isFinite(holder?.startedMs) && now() - holder.startedMs < 10 * 60_000) {
+					return { ok: true, lines: ["setup: locked"] };
+				}
+				fs.rmSync(lock, { force: true });
+				const fd = fs.openSync(lock, "wx");
+				fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedMs: now() }));
+				fs.closeSync(fd);
+				acquired = true;
+			}
+			const sourceFile = path.join(l.app, "source.json");
+			const previous = readJsonSafe(sourceFile);
+			if (previous?.channel === "checkout") return { ok: true, lines: ["setup: checkout install kept"] };
+			const git = runners.git(["rev-parse", "HEAD"], { cwd: repoRoot });
+			const sha = git.status === 0 ? String(git.stdout).trim() || null : null;
+			if (previous?.channel === "package" && previous.sha === sha && isSamePath(previous.source, repoRoot) &&
+				fs.existsSync(path.join(l.app, "src", "server.mjs"))) return { ok: true, lines: ["app: current"] };
+			fs.rmSync(path.join(l.home, "disabled"), { force: true });
+			const result = await install({ ...opts, fromPackage: false, repoRoot, packageInner: true });
+			const state = result.ok
+				? { sha, doneMs: now() }
+				: { sha, failedMs: now(), error: result.lines.join("; ") };
+			writeIfChanged(path.join(l.home, "setup-state.json"), `${JSON.stringify(state, null, 2)}\n`);
+			fs.mkdirSync(l.app, { recursive: true });
+			const metadata = {
+				channel: "package",
+				source: repoRoot,
+				sha,
+				version: readJsonSafe(path.join(repoRoot, "package.json"))?.version ?? null,
+				installedMs: now(),
+			};
+			writeIfChanged(sourceFile, `${JSON.stringify(metadata, null, 2)}\n`);
+			fs.rmSync(path.join(l.home, "disabled"), { force: true });
+			fs.mkdirSync(l.logs, { recursive: true });
+			fs.appendFileSync(path.join(l.logs, "install.log"), `${now()} ${result.ok ? "done" : "failed"} ${sha ?? ""}\n`);
+			return result;
+		} finally {
+			if (acquired) fs.rmSync(lock, { force: true });
+		}
+	}
 	const lines = [];
 	let ok = true;
 	const fail = (reason) => {
@@ -257,10 +319,10 @@ export async function install(opts = {}) {
 		lines.push("autostart: skipped");
 	} else {
 		const wanted = runCommandValue(l);
-		if (readRunValue(runners.reg) === wanted) {
+		if (readRunValue(runners.reg, runValueName(env)) === wanted) {
 			lines.push("autostart: unchanged");
 		} else {
-			const result = runners.reg(["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", wanted, "/f"]);
+			const result = runners.reg(["add", RUN_KEY, "/v", runValueName(env), "/t", "REG_SZ", "/d", wanted, "/f"]);
 			lines.push(`autostart: ${result.status === 0 ? "written" : fail(String(result.stderr ?? "").trim())}`);
 		}
 	}
@@ -268,7 +330,8 @@ export async function install(opts = {}) {
 	// 4. extension
 	const extSrc = path.join(l.app, "extension", "omo-desk.ts");
 	const extDst = path.join(agentDir(env), "extensions", "omo-desk.ts");
-	if (!fs.existsSync(extSrc)) lines.push("extension: skipped");
+	if (opts.packageInner) lines.push(`extension: legacy ${removePath(extDst)}`);
+	else if (!fs.existsSync(extSrc)) lines.push("extension: skipped");
 	else if (filesEqual(extSrc, extDst)) lines.push("extension: unchanged");
 	else {
 		fs.mkdirSync(path.dirname(extDst), { recursive: true });
@@ -297,11 +360,11 @@ export async function install(opts = {}) {
 	}
 
 	// 7. config from tailscale status
-	const ts = status(runners.tailscale);
+	const ts = env.DESK_NO_TAILSCALE === "1" ? { publicBase: null, pcTailnetIps: [], owner: null, dns: null } : status(runners.tailscale);
 	lines.push(`config: ${updateConfig(env, { publicBase: ts.publicBase, pcTailnetIps: ts.pcTailnetIps, owner: ts.owner })}`);
 
 	// 8. tailscale serve on the tailnet port, guarded against disturbing 443.
-	if (opts.noTailscale || ts.publicBase === null) {
+	if (env.DESK_NO_TAILSCALE === "1" || opts.noTailscale || ts.publicBase === null) {
 		lines.push("tailscale: skipped");
 	} else {
 		const baseline = parseServe(runners.tailscale(["serve", "status", "--json"]));
@@ -333,6 +396,17 @@ export async function install(opts = {}) {
 	}
 
 	lines.push(RELOAD_HINT);
+	const sourceFile = path.join(l.app, "source.json");
+	if (fs.existsSync(l.app) && !opts.packageInner) {
+		const metadata = {
+			channel: "checkout",
+			source: repoRoot,
+			sha: null,
+			version: readJsonSafe(path.join(repoRoot, "package.json"))?.version ?? null,
+			installedMs: now(),
+		};
+		writeIfChanged(sourceFile, `${JSON.stringify(metadata, null, 2)}\n`);
+	}
 	return { ok, lines };
 }
 
@@ -341,6 +415,14 @@ export async function install(opts = {}) {
 export async function uninstall(opts = {}) {
 	const { env, userHome, fetchImpl, now, sleep, runners } = resolve(opts);
 	const l = layout(env);
+	const priorSource = readJsonSafe(path.join(l.app, "source.json"));
+	const cwd = process.cwd();
+	const appPath = canonicalPath(l.app);
+	const cwdPath = canonicalPath(cwd);
+	const movedCwd = cwdPath === appPath || cwdPath.startsWith(`${appPath}${path.sep}`);
+	if (movedCwd) process.chdir(path.dirname(l.home));
+	const disabled = priorSource?.channel === "package" || opts.disable;
+	if (disabled) writeIfChanged(path.join(l.home, "disabled"), "disabled\n");
 	const lines = [];
 	let ok = true;
 	const fail = (reason) => {
@@ -365,8 +447,8 @@ export async function uninstall(opts = {}) {
 		lines.push("server: not-running");
 	}
 
-	if (readRunValue(runners.reg) !== undefined) {
-		const result = runners.reg(["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
+	if (readRunValue(runners.reg, runValueName(env)) !== undefined) {
+		const result = runners.reg(["delete", RUN_KEY, "/v", runValueName(env), "/f"]);
 		lines.push(`autostart: ${result.status === 0 ? "removed" : fail(String(result.stderr ?? "").trim())}`);
 	} else {
 		lines.push("autostart: absent");
@@ -380,7 +462,7 @@ export async function uninstall(opts = {}) {
 	lines.push(`skill: ${skillDirs.map(removePath).includes("removed") ? "removed" : "absent"}`);
 	lines.push(`rule: ${removePath(path.join(userHome, ".claude", "rules", "visual-board.md"))}`);
 
-	if (cfg.publicBase === null) {
+	if (env.DESK_NO_TAILSCALE === "1" || opts.noTailscale || cfg.publicBase === null) {
 		lines.push("tailscale: skipped");
 	} else {
 		const dns = status(runners.tailscale).dns;
@@ -396,7 +478,12 @@ export async function uninstall(opts = {}) {
 	lines.push(`config: ${removePath(l.config)}`);
 	lines.push(`serverJson: ${removePath(l.serverJson)}`);
 	lines.push(`data kept: ${l.data}`);
-	return { ok, lines };
+	const result = { ok, lines };
+	if (disabled) {
+		fs.mkdirSync(l.home, { recursive: true });
+		writeIfChanged(path.join(l.home, "disabled"), "disabled\n");
+	}
+	return result;
 }
 
 // ---- doctor --------------------------------------------------------------------------------------
@@ -413,13 +500,15 @@ export async function doctor(opts = {}) {
 	const cfg = readConfig(env);
 
 	record("health", await healthOk(fetchImpl, cfg.port), "no answer");
-	record("run", readRunValue(runners.reg) === runCommandValue(l), "Run value differs");
+	record("run", readRunValue(runners.reg, runValueName(env)) === runCommandValue(l), "Run value differs");
 	record("launcher", readText(l.launcher) === launcherContent({ nodeExe: execPath, serverPath: path.join(l.app, "src", "server.mjs") }), "content differs");
-	record(
-		"extension",
-		filesEqual(path.join(l.app, "extension", "omo-desk.ts"), path.join(agentDir(env), "extensions", "omo-desk.ts")),
-		"differs from the app copy",
-	);
+	const source = readJsonSafe(path.join(l.app, "source.json"));
+	const noTailscale = env.DESK_NO_TAILSCALE === "1" || opts.noTailscale;
+	const extensionOk = source?.channel === "package"
+		? filesEqual(path.join(l.app, "extension", "omo-desk.ts"), path.join(source.source, "extension", "omo-desk.ts")) &&
+			!fs.existsSync(path.join(agentDir(env), "extensions", "omo-desk.ts"))
+		: filesEqual(path.join(l.app, "extension", "omo-desk.ts"), path.join(agentDir(env), "extensions", "omo-desk.ts"));
+	record("extension", extensionOk, "differs from the app copy");
 	record(
 		"skill",
 		fs.existsSync(path.join(userHome, ".agents", "skills", "visual-board", "SKILL.md")) &&
@@ -428,13 +517,15 @@ export async function doctor(opts = {}) {
 	);
 	record("rule", fs.existsSync(path.join(userHome, ".claude", "rules", "visual-board.md")), "missing");
 
-	const ts = status(runners.tailscale);
-	const serve = parseServe(runners.tailscale(["serve", "status", "--json"]));
+	const ts = noTailscale ? { dns: null } : status(runners.tailscale);
+	const serve = noTailscale ? {} : parseServe(runners.tailscale(["serve", "status", "--json"]));
 	const proxy = ts.dns ? serve.Web?.[`${ts.dns}:4378`]?.Handlers?.["/"]?.Proxy : undefined;
-	record("serve", proxy === SERVE_PROXY, "4378 handler missing");
-	record("funnel", !(ts.dns && Object.prototype.hasOwnProperty.call(serve.AllowFunnel ?? {}, `${ts.dns}:4378`)), "AllowFunnel has a 4378 key");
+	if (!noTailscale) {
+		record("serve", proxy === SERVE_PROXY, "4378 handler missing");
+		record("funnel", !(ts.dns && Object.prototype.hasOwnProperty.call(serve.AllowFunnel ?? {}, `${ts.dns}:4378`)), "AllowFunnel has a 4378 key");
+	}
 	const baseline443 = cfg.baseline443;
-	record(
+	if (!noTailscale) record(
 		"baseline443",
 		Boolean(baseline443) &&
 			isDeepStrictEqual(serve.Web?.[`${ts.dns}:443`] ?? null, baseline443.web ?? null) &&

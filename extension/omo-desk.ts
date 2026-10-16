@@ -20,8 +20,10 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CHILD_ENV = ["OMO_SENPI_TASK_RPC_CHILD", "SENPI_TASK_MEMBER", "SENPI_TASK_MEMBER_TASK_ID"];
 const INBOX_MS = 3000;
@@ -45,6 +47,9 @@ export function createDesk(pi, deps = {}) {
 	const env = deps.env ?? process.env;
 	if (CHILD_ENV.some((key) => String(env[key] ?? "").length > 0)) return null;
 	const home = deps.home ?? env.OMO_DESK_HOME ?? path.join(os.homedir(), ".omo-desk");
+	const agentDir = deps.agentDir ?? env.DESK_AGENT_DIR ?? env.OMO_CODING_AGENT_DIR ?? env.SENPI_CODING_AGENT_DIR ?? env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".omo", "agent");
+	const source = path.resolve(deps.source ?? path.dirname(path.dirname(fileURLToPath(import.meta.url))));
+	const ownFile = path.resolve(deps.extensionFile ?? fileURLToPath(import.meta.url));
 	const now = deps.now ?? (() => Date.now());
 	const timer = deps.timer ?? { setInterval, clearInterval };
 	const doFetch = deps.fetch ?? ((...args) => globalThis.fetch(...args));
@@ -53,6 +58,16 @@ export function createDesk(pi, deps = {}) {
 	const spawnImpl = deps.spawn ?? spawn;
 	const execPath = deps.execPath ?? process.execPath;
 	const platform = deps.platform ?? process.platform;
+	const legacyExtension = path.join(agentDir, "extensions", "omo-desk.ts");
+	const packageMode = deps.packageMode ?? (!deps.home && existsSync(path.join(source, ".git")) && existsSync(path.join(source, "bin", "desk.mjs")) && path.resolve(path.dirname(ownFile)) !== path.resolve(path.join(agentDir, "extensions")));
+	const setupOnly = packageMode && existsSync(legacyExtension);
+	const loadedSha = deps.loadedSha ?? (packageMode ? readCloneSha(source) : null);
+	const activeKey = Symbol.for("omo-desk.extension.active");
+	const owner = packageMode && !setupOnly;
+	if (owner && globalThis[activeKey]) return null;
+	if (owner) globalThis[activeKey] = source;
+	let reloadTries = 0;
+	let lastReloadAt = -Infinity;
 
 	const delivered = new Set();
 	const noticed = new Set();
@@ -72,7 +87,6 @@ export function createDesk(pi, deps = {}) {
 	let rerunStart = false;
 	let refreshTimeoutMs = FETCH_TIMEOUT_MS;
 	let rerunTimeoutMs = FETCH_TIMEOUT_MS;
-
 	const log = async (text) => {
 		try {
 			await fsImpl.mkdir(path.join(home, "logs"), { recursive: true });
@@ -123,6 +137,46 @@ export function createDesk(pi, deps = {}) {
 		}
 	}
 
+	const packageTick = safe("package", async () => {
+		if (!packageMode || await exists(path.join(home, "disabled"))) return;
+		let state;
+		try {
+			state = JSON.parse(await fsImpl.readFile(path.join(home, "app", "source.json"), "utf8"));
+		} catch {
+			state = undefined;
+		}
+		if (state?.channel === "checkout") return;
+		const sha = await readCloneShaAsync(source, fsImpl);
+		if (!sha) return;
+		const sameSource = state?.source && path.resolve(state.source) === source;
+		if (state?.channel === "package" && state.sha === sha && sameSource) {
+			const legacyGone = !(await exists(legacyExtension));
+			if ((setupOnly && legacyGone) || loadedSha !== sha) {
+				if (reloadTries >= 3 || now() - lastReloadAt < 60_000) return;
+				if (ctx?.isIdle?.() === false || (ctx?.hasPendingMessages?.() ?? ctx?.pendingMessages?.length > 0)) return;
+				reloadTries += 1;
+				lastReloadAt = now();
+				(ctx?.requestReload ?? ctx?.reload)?.call(ctx);
+			}
+			return;
+		}
+		let claim;
+		try {
+			claim = JSON.parse(await fsImpl.readFile(path.join(home, "setup-state.json"), "utf8"));
+		} catch {
+			claim = undefined;
+		}
+		if ((claim?.sha === sha && claim.failedMs && now() - claim.failedMs < 10 * 60_000) || (claim?.sha === sha && claim.claimMs && now() - claim.claimMs < 60_000)) return;
+		await fsImpl.mkdir(home, { recursive: true });
+		const claimFile = path.join(home, "setup-state.json");
+		await fsImpl.writeFile(claimFile, JSON.stringify({ sha, claimMs: now(), pid: process.pid }));
+		let confirmed;
+		try { confirmed = JSON.parse(await fsImpl.readFile(claimFile, "utf8")); } catch { return; }
+		if (confirmed.sha !== sha || confirmed.pid !== process.pid) return;
+		const child = spawnImpl(execPath, [path.join(source, "bin", "desk.mjs"), "install", "--from-package"], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
+		child?.unref?.();
+	});
+
 	async function resolveNode() {
 		if (/^node(\.exe)?$/i.test(path.basename(execPath))) return execPath;
 		const pathValue = env.PATH ?? env.Path ?? process.env.PATH ?? "";
@@ -135,6 +189,8 @@ export function createDesk(pi, deps = {}) {
 
 	/** The CLI launches the server outside this session's job (WMI on Windows); at most one attempt per 120 s. */
 	const ensureServer = safe("ensure", async () => {
+		// A package install that has not finished setup has no app yet; setup starts the server itself.
+		if (await exists(path.join(home, "disabled")) || (packageMode && !(await exists(path.join(home, "app", "bin", "desk.mjs"))))) return;
 		if (now() - lastSpawnAt < SPAWN_COOLDOWN_MS) return;
 		lastSpawnAt = now();
 		const node = await resolveNode();
@@ -221,6 +277,11 @@ export function createDesk(pi, deps = {}) {
 	});
 
 	const refreshStatus = safe("status", async (start) => {
+		// After /desk uninstall there is no server to report on.
+		if (await exists(path.join(home, "disabled"))) {
+			await setFooter(undefined);
+			return;
+		}
 		const cwd = ctx?.cwd ?? pi?.cwd ?? process.cwd();
 		if (!sessionId || !cwd) return;
 		const url = `${await baseUrl()}/api/here?cwd=${encodeURIComponent(cwd)}&session=${encodeURIComponent(sessionId)}${start ? "&start=1" : ""}`;
@@ -365,6 +426,12 @@ export function createDesk(pi, deps = {}) {
 	});
 
 	function start() {
+		if (setupOnly) {
+			const id = timer.setInterval(() => packageTick(), STATUS_MS);
+			id?.unref?.();
+			timers.push(id);
+			return;
+		}
 		if (running) return;
 		running = true;
 		const every = (ms, fn) => {
@@ -374,6 +441,7 @@ export function createDesk(pi, deps = {}) {
 		};
 		every(INBOX_MS, () => inbox());
 		every(STATUS_MS, () => status(false));
+		if (packageMode) every(STATUS_MS, () => packageTick());
 	}
 
 	function stop() {
@@ -386,22 +454,27 @@ export function createDesk(pi, deps = {}) {
 		}
 		timers = [];
 		running = false;
+		if (owner && globalThis[activeKey] === source) delete globalThis[activeKey];
 	}
 
 	const onSessionStart = safe("session_start", async (_event, nextCtx) => {
 		ctx = nextCtx;
+		await packageTick();
+		start();
+		if (setupOnly) return;
 		initializedSession = false;
 		try {
 			sessionId = nextCtx?.sessionManager?.getSessionId?.() ?? sessionId;
 		} catch {
 			// keep the previous id
 		}
-		start();
 		await status(true);
 	});
 
 	const onSessionShutdown = safe("session_shutdown", async () => {
 		stop();
+		if (owner && globalThis[activeKey] === source) delete globalThis[activeKey];
+		if (setupOnly) return;
 		pi?.events?.emit?.(HOLD_EVENT, { source: WAKE_SOURCE, active: false });
 		pi?.events?.emit?.(WAKE_EVENT, { source: WAKE_SOURCE, activeCount: 0 });
 		if (!sessionId) return;
@@ -420,12 +493,73 @@ export function createDesk(pi, deps = {}) {
 	try {
 		pi?.on?.("session_start", onSessionStart);
 		pi?.on?.("session_shutdown", onSessionShutdown);
+		if (setupOnly) return { stop, packageTick };
+		if (owner) pi?.registerCommand?.("desk", {
+			handler: async (args, commandCtx) => {
+				const action = String(args ?? "").trim().split(/\s+/)[0];
+				let executable;
+				let cliArgs;
+				if (action === "install") {
+					if (!packageMode) {
+						commandCtx?.ui?.notify?.("패키지 설치에서만 사용할 수 있습니다.", "warning");
+						return;
+					}
+					executable = path.join(source, "bin", "desk.mjs");
+					cliArgs = ["install", "--from-package"];
+				} else if (action === "uninstall") {
+					executable = path.join(packageMode ? source : path.join(home, "app"), "bin", "desk.mjs");
+					cliArgs = ["uninstall"];
+				} else {
+					commandCtx?.ui?.notify?.("사용법: /desk install | /desk uninstall", "info");
+					return;
+				}
+				const child = spawnImpl(execPath, [executable, ...cliArgs], { detached: true, stdio: "ignore", windowsHide: true, cwd: home, env });
+				child?.unref?.();
+				commandCtx?.ui?.notify?.(action === "install" ? "omo-desk 설치를 시작했습니다." : "omo-desk 제거를 시작했습니다.", "info");
+			},
+		});
 		pi?.on?.("tool_execution_end", onToolExecutionEnd);
 	} catch (error) {
 		void log(`register: ${String((error && error.message) || error)}`);
 	}
 
-	return { inbox, status, notice, stop };
+	return { inbox, status, notice, packageTick, stop };
+}
+
+function readCloneSha(source) {
+	try {
+		const gitDir = path.join(source, ".git");
+		let head = readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+		if (!head.startsWith("ref: ")) return /^[0-9a-f]{40}$/i.test(head) ? head : null;
+		const ref = head.slice(5);
+		try {
+			const sha = readFileSync(path.join(gitDir, ...ref.split("/")), "utf8").trim();
+			if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+		} catch {}
+		for (const line of readFileSync(path.join(gitDir, "packed-refs"), "utf8").split(/\r?\n/)) {
+			const match = line.match(/^([0-9a-f]{40})\s+(.+)$/i);
+			if (match?.[2] === ref) return match[1];
+		}
+	} catch {}
+	return null;
+}
+
+async function readCloneShaAsync(source, fsImpl) {
+	try {
+		const gitDir = path.join(source, ".git");
+		const head = String(await fsImpl.readFile(path.join(gitDir, "HEAD"), "utf8")).trim();
+		if (!head.startsWith("ref: ")) return /^[0-9a-f]{40}$/i.test(head) ? head : null;
+		const ref = head.slice(5);
+		try {
+			const sha = String(await fsImpl.readFile(path.join(gitDir, ...ref.split("/")), "utf8")).trim();
+			if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+		} catch {}
+		for (const line of String(await fsImpl.readFile(path.join(gitDir, "packed-refs"), "utf8")).split(/\r?\n/)) {
+			const match = line.match(/^([0-9a-f]{40})\s+(.+)$/i);
+			if (match?.[2] === ref) return match[1];
+		}
+	} catch {}
+	return null;
 }
 
 export default function omoDeskExtension(pi, deps = {}) {

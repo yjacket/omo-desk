@@ -46,6 +46,7 @@ export function readConfig(env = process.env) {
 
 export function agentDir(env = process.env) {
 	return (
+		env.DESK_AGENT_DIR ||
 		env.OMO_CODING_AGENT_DIR ||
 		env.SENPI_CODING_AGENT_DIR ||
 		env.PI_CODING_AGENT_DIR ||

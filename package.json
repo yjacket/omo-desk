@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Review inbox for omo/senpi sessions: proposals with screens, ER and flow diagrams, feedback marks, and a per-product history.",
+  "pi": {
+    "extensions": ["extension/omo-desk.ts"]
+  },
   "engines": {
     "node": ">=24"
   },

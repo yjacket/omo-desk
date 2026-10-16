@@ -673,6 +673,45 @@ function writeServerJson(file, logsDir, port, version) {
 	}
 }
 
+function readSourceJson(file) {
+	try {
+		return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+	} catch {
+		return null;
+	}
+}
+
+// Package installs whose source folder is gone are orphans; uninstall once after the grace period.
+export function createOrphanWatch({
+	home,
+	now = () => Date.now(),
+	exists = (file) => fs.existsSync(file),
+	spawn: run = spawn,
+	graceMs = 20 * 60_000,
+	execPath = process.execPath,
+	readJson = readSourceJson,
+} = {}) {
+	const sourceFile = path.join(home, "app", "source.json");
+	const cli = path.join(home, "app", "bin", "desk.mjs");
+	let firstMissing = null;
+	let done = false;
+	return {
+		tick() {
+			if (done) return;
+			const meta = readJson(sourceFile);
+			if (!meta || meta.channel !== "package" || !meta.source || exists(meta.source)) {
+				firstMissing = null;
+				return;
+			}
+			const at = now();
+			firstMissing ??= at;
+			if (at - firstMissing < graceMs) return;
+			done = true;
+			run(execPath, [cli, "uninstall"], { detached: true, stdio: "ignore", windowsHide: true, cwd: home }).unref();
+		},
+	};
+}
+
 async function main() {
 	const config = readConfig();
 	const l = layout();
@@ -685,6 +724,8 @@ async function main() {
 	});
 	try {
 		await server.listen();
+		const orphan = createOrphanWatch({ home: l.home, graceMs: Number(process.env.DESK_ORPHAN_GRACE_MS) || 20 * 60_000 });
+		setInterval(() => orphan.tick(), 60_000).unref();
 	} catch (error) {
 		if (error && error.code === "EADDRINUSE") {
 			if (await probeHealth(wanted)) process.exit(0);
