@@ -1,6 +1,6 @@
-# omo-desk
-
 > **Deprecated - do not install or use.** This extension is unmaintained and must not be installed or used. There is no replacement. [omo-inbox](https://github.com/yjacket/omo-inbox) covers phone access for omo/senpi sessions; it does not provide visual proposal boards.
+
+# omo-desk
 
 English | [한국어](README.ko.md)
 

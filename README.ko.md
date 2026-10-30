@@ -1,6 +1,6 @@
-# omo-desk
-
 > **지원 종료 - 설치하거나 사용하지 마세요.** 이 확장은 더 이상 유지되지 않으며 설치하거나 사용하면 안 됩니다. 대체품은 없습니다. [omo-inbox](https://github.com/yjacket/omo-inbox)가 omo/senpi 세션의 휴대폰 접근을 맡고 있지만 시각 기획안 보드는 제공하지 않습니다.
+
+# omo-desk
 
 [English](README.md) | 한국어
 
