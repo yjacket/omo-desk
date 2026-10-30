@@ -1,5 +1,7 @@
 # omo-desk
 
+> **Deprecated - do not install or use.** This extension is unmaintained and must not be installed or used. There is no replacement. [omo-inbox](https://github.com/yjacket/omo-inbox) covers phone access for omo/senpi sessions; it does not provide visual proposal boards.
+
 English | [한국어](README.ko.md)
 
 A local review inbox for visual proposals. An omo agent session submits a board (pictures, diagrams, questions), you review it in the browser on your PC or phone, and your feedback goes back to the session that asked. Node 24, plain ESM, zero npm dependencies, no build step.
